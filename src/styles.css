@@ -1,0 +1,79 @@
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+}
+
+.resource-card-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.clickable-card,
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-card {
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.clickable-card:active {
+  transform: translateY(1px);
+}
+
+.script-editor-field {
+  margin-bottom: 1rem;
+}
+
+.script-editor-frame {
+  overflow: hidden;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-body);
+}
+
+.script-editor-frame:focus-within {
+  border-color: var(--mantine-primary-color-filled);
+  box-shadow: 0 0 0 1px var(--mantine-primary-color-filled);
+}
+
+@media (min-width: 75em) {
+  .editor-grid {
+    grid-template-columns: minmax(290px, 0.65fr) minmax(520px, 1.5fr);
+    align-items: start;
+  }
+
+  .identity-panel {
+    position: sticky;
+    top: 80px;
+  }
+
+  .explorer-grid {
+    grid-template-columns: 340px minmax(520px, 1fr);
+    align-items: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
