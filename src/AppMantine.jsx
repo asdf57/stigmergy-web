@@ -5,7 +5,7 @@ import {
   ActionIcon, Alert, AppShell, Avatar, Badge, Box, Burger, Button, Card,
   Code, Divider, Group, JsonInput, Loader, Modal, NavLink, Paper, ScrollArea,
   SegmentedControl, Select, SimpleGrid, Skeleton, Stack, Table, Tabs, Text, TextInput,
-  ThemeIcon, Title, Tooltip, useComputedColorScheme, useMantineColorScheme,
+  ThemeIcon, Title, Tooltip, PasswordInput, useComputedColorScheme, useMantineColorScheme,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
@@ -23,9 +23,9 @@ const EMPTY_SPEC = { paths: {}, components: { schemas: {} } }
 const FILE_REGISTRY_URL = import.meta.env.VITE_FILE_REGISTRY_URL || 'https://copyparty.ryuugu.dev/'
 const groups = [
   ['Infrastructure', ['Machine', 'MachineReport', 'Server', 'Router', 'DNSRecord'], Server],
-  ['Automation', ['Pipeline', 'PipelineProvider', 'CommandsPipeline', 'Command'], Activity],
+  ['Automation', ['ISO', 'Pipeline', 'PipelineProvider', 'CommandsPipeline', 'Command'], Activity],
   ['Inventory', ['InventoryCaptureGroup', 'InventoryPublication', 'GitRepository'], Database],
-  ['Security', ['SecretStore', 'Secret', 'SSHKeyPair', 'UsernamePasswordCredential'], Shield],
+  ['Security', ['SecretStore', 'Secret', 'SSHKeyPair', 'SSHCertificateAuthority', 'UsernamePasswordCredential'], Shield],
 ]
 
 const humanize = (value = '') => value.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
@@ -39,8 +39,16 @@ function useHashRoute() {
   return route
 }
 
+let sessionApiToken = ''
+function authorizedFetch(path, options = {}) {
+  const url = new URL(path, window.location.origin)
+  const headers = new Headers(options.headers)
+  if (sessionApiToken && url.origin === window.location.origin && url.pathname.startsWith('/api/') && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${sessionApiToken}`)
+  return fetch(path, { ...options, headers })
+}
+
 async function apiFetch(path, options = {}) {
-  const response = await fetch(path, options)
+  const response = await authorizedFetch(path, options)
   const type = response.headers.get('content-type') || ''
   const body = type.includes('json') ? await response.json() : await response.text()
   if (!response.ok) {
@@ -83,6 +91,11 @@ const referenceKinds = {
   providerRef: 'PipelineProvider',
   secretStoreRef: 'SecretStore',
   sshKeyPairRef: 'SSHKeyPair',
+  signingKeyRef: 'SSHKeyPair',
+  trustedKeyRefs: 'SSHKeyPair',
+  sshCertificateAuthorityRef: 'SSHCertificateAuthority',
+  repositoryRef: 'GitRepository',
+  isoRef: 'ISO',
 }
 
 const constrainedReferenceKinds = {
@@ -346,11 +359,13 @@ function ApiExplorer({ spec }) {
   const [selected, setSelected] = useState(operations[0]); const [values, setValues] = useState({}); const [headers, setHeaders] = useState({}); const [body, setBody] = useState('{}'); const [result, setResult] = useState(null); const [sending, setSending] = useState(false); const [confirm, { open: openConfirm, close: closeConfirm }] = useDisclosure(false)
   if (!selected) return null
   const parameters = [...(spec.paths[selected.path]?.parameters || []), ...(selected.parameters || [])]
-  const send = async (confirmed = false) => { if (selected.method === 'DELETE' && !confirmed) { openConfirm(); return }; closeConfirm(); let path = selected.path; Object.entries(values).forEach(([key, value]) => { path = path.replace(`{${key}}`, encodeURIComponent(value)) }); setSending(true); try { const requestHeaders = { ...headers }; const options = { method: selected.method, headers: requestHeaders }; if (!['GET', 'DELETE'].includes(selected.method) || body.trim() !== '{}') { requestHeaders['Content-Type'] = selected.method === 'PATCH' ? 'application/merge-patch+json' : 'application/json'; options.body = body }; const start = performance.now(); const response = await fetch(path, options); const text = await response.text(); let parsed = text; try { parsed = JSON.parse(text) } catch { /* plain text */ }; setResult({ status: response.status, ok: response.ok, duration: Math.round(performance.now() - start), body: parsed }) } catch (caught) { showNotice(caught.message, 'error') } finally { setSending(false) } }
+  const send = async (confirmed = false) => { if (selected.method === 'DELETE' && !confirmed) { openConfirm(); return }; closeConfirm(); let path = selected.path; Object.entries(values).forEach(([key, value]) => { path = path.replace(`{${key}}`, encodeURIComponent(value)) }); setSending(true); try { const requestHeaders = { ...headers }; const options = { method: selected.method, headers: requestHeaders }; if (!['GET', 'DELETE'].includes(selected.method) || body.trim() !== '{}') { requestHeaders['Content-Type'] = selected.method === 'PATCH' ? 'application/merge-patch+json' : 'application/json'; options.body = body }; const start = performance.now(); const response = await authorizedFetch(path, options); const text = await response.text(); let parsed = text; try { parsed = JSON.parse(text) } catch { /* plain text */ }; setResult({ status: response.status, ok: response.ok, duration: Math.round(performance.now() - start), body: parsed }) } catch (caught) { showNotice(caught.message, 'error') } finally { setSending(false) } }
   return <><PageTitle overline="Developer tools" title="API Explorer" description="Inspect and call every operation in the OpenAPI document." /><SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md" className="explorer-grid"><Paper withBorder radius="md" p="xs"><ScrollArea h={{ base: 300, lg: 'calc(100vh - 190px)' }}>{operations.map((operation) => <NavLink key={`${operation.method}-${operation.path}`} active={selected.operationId === operation.operationId} onClick={() => { setSelected(operation); setValues({}); setHeaders({}); setBody('{}'); setResult(null) }} label={operation.summary || operation.operationId} description={operation.path} leftSection={<Badge size="sm" w={58} color={operation.method === 'DELETE' ? 'red' : operation.method === 'GET' ? 'blue' : 'green'} variant="light">{operation.method}</Badge>} />)}</ScrollArea></Paper><Paper withBorder radius="md" p={{ base: 'md', sm: 'xl' }}><Group align="flex-start" wrap="nowrap"><Badge color={selected.method === 'DELETE' ? 'red' : selected.method === 'GET' ? 'blue' : 'green'} size="lg">{selected.method}</Badge><Box><Title order={2} size="h4">{selected.summary}</Title><Code>{selected.path}</Code></Box></Group>{selected.description && <Text c="dimmed" mt="md">{selected.description}</Text>}{parameters.map((parameter) => <TextInput key={`${parameter.in}-${parameter.name}`} label={parameter.name} description={`${parameter.in}${parameter.description ? ` · ${parameter.description}` : ''}`} required={parameter.required} value={(parameter.in === 'header' ? headers : values)[parameter.name] || ''} onChange={(event) => parameter.in === 'header' ? setHeaders({ ...headers, [parameter.name]: event.currentTarget.value }) : setValues({ ...values, [parameter.name]: event.currentTarget.value })} mt="md" />)}{selected.requestBody && <JsonInput label="Request body" value={body} onChange={setBody} validationError="Invalid JSON" formatOnBlur autosize minRows={10} mt="md" styles={{ input: { fontFamily: 'ui-monospace, monospace' } }} />}<Button leftSection={<Activity size={15} />} loading={sending} onClick={() => send()} mt="lg">Send request</Button>{result && <Box mt="xl"><Group mb="xs"><Badge color={result.ok ? 'green' : 'red'}>{result.status}</Badge><Text size="xs" c="dimmed">{result.duration} ms</Text></Group><JsonView value={result.body} /></Box>}</Paper></SimpleGrid><Modal opened={confirm} onClose={closeConfirm} title="Send destructive request?" centered><Text size="sm" c="dimmed">Send DELETE {selected.path}? Verify the path parameters before continuing.</Text><Group justify="flex-end" mt="xl"><Button variant="default" onClick={closeConfirm}>Cancel</Button><Button color="red" onClick={() => send(true)}>Send DELETE</Button></Group></Modal></>
 }
 
 export default function AppMantine() {
+  const [token, setToken] = useState(sessionApiToken)
+  const [tokenRevision, setTokenRevision] = useState(0)
   const route = useHashRoute(); const [spec, setSpec] = useState(EMPTY_SPEC); const [specError, setSpecError] = useState(''); const [readiness, setReadiness] = useState({ status: 'loading', message: 'Checking API…' }); const [opened, { toggle, close }] = useDisclosure(false)
   const resources = useMemo(() => discoverResources(spec), [spec]); const resource = resources.find((entry) => entry.slug === route[1])
   const check = useCallback(async () => { setReadiness({ status: 'loading', message: 'Checking API…' }); try { const result = await apiFetch('/openapi.json'); setSpec(result.body); setSpecError(''); try { const ready = await apiFetch('/readyz'); setReadiness({ status: 'good', message: ready.body.status || 'Ready' }) } catch (error) { setReadiness({ status: 'bad', message: error.message }) } } catch (error) { setSpecError(error.message); setReadiness({ status: 'bad', message: error.message }) } }, [])
@@ -360,5 +375,5 @@ export default function AppMantine() {
   else if (route[0] === 'explorer') content = <ApiExplorer spec={spec} />
   else if (route[0] === 'resources' && resource) content = route[2] === 'new' ? <ResourceEditor resource={resource} resources={resources} spec={spec} /> : route[2] && route[3] === 'edit' ? <ResourceEditor resource={resource} resources={resources} spec={spec} name={decodeURIComponent(route[2])} /> : route[2] ? <ResourceDetail resource={resource} name={decodeURIComponent(route[2])} /> : <ResourceList resource={resource} />
   else content = <Dashboard resources={resources} readiness={readiness} />
-  return <Layout resources={resources} route={route} readiness={readiness} opened={opened} toggle={toggle} close={close}>{content}</Layout>
+  return <Layout key={tokenRevision} resources={resources} route={route} readiness={readiness} opened={opened} toggle={toggle} close={close}><Group align="end" mb="lg"><PasswordInput label="API bearer token" description="Kept only for this browser session" value={token} onChange={(event) => setToken(event.currentTarget.value)} style={{ flex: 1 }} /><Button variant="default" onClick={() => { sessionApiToken = token.trim(); setTokenRevision((value) => value + 1) }}>Connect</Button></Group>{content}</Layout>
 }
