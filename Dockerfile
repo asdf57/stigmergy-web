@@ -17,4 +17,4 @@ COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 4173
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -q --spider http://127.0.0.1:4173/ && wget -q --spider http://127.0.0.1:4173/readyz || exit 1
+  CMD wget -q --spider http://127.0.0.1:4173/ && wget -q -O /dev/null http://127.0.0.1:4173/readyz || exit 1
