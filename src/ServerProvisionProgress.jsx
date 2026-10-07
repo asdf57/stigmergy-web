@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { Alert, Badge, Code, Group, Paper, Stack, Text, Title } from '@mantine/core'
-import { provisioningProgress } from './serverProvisioningProgress.js'
+import { acceptProvisioningUpdate, provisioningProgress } from './serverProvisioningProgress.js'
 
 export default function ServerProvisionProgress({ item, resourcePath, apiFetch, onUpdate }) {
   const [error, setError] = useState('')
+  const [run, setRun] = useState(null)
   const update = useRef(onUpdate)
   update.current = onUpdate
   const name = item.metadata.name
   const uid = item.metadata.uid
+  const reference = item.status?.provisioning?.activeRunRef || item.status?.provisioning?.lastRunRef || item.status?.provisioning?.lastSuccessfulRunRef
 
   useEffect(() => {
+    setRun(null)
     let active = true
     let timer
     const controller = new AbortController()
@@ -25,6 +28,12 @@ export default function ServerProvisionProgress({ item, resourcePath, apiFetch, 
               return
             }
             update.current(result)
+            const ref = result.body.status?.provisioning?.activeRunRef || result.body.status?.provisioning?.lastRunRef || result.body.status?.provisioning?.lastSuccessfulRunRef
+            if (ref) {
+              const response = await apiFetch(`${resourcePath.replace(/\/servers$/, '/provisioning-runs')}/${encodeURIComponent(ref.name)}`, { signal: controller.signal })
+              if (response.body.metadata.uid !== ref.uid) throw new Error('The referenced ProvisioningRun was replaced.')
+              if (active) setRun(previous => !previous || previous.metadata.uid !== ref.uid || acceptProvisioningUpdate(previous, response.body) ? response.body : previous)
+            } else if (active) setRun(null)
             setError('')
           }
         }
@@ -34,23 +43,23 @@ export default function ServerProvisionProgress({ item, resourcePath, apiFetch, 
         if (active) timer = setTimeout(poll, 5000)
       }
     }
-    timer = setTimeout(poll, 5000)
+    poll()
     return () => {
       active = false
       clearTimeout(timer)
       controller.abort()
     }
-  }, [apiFetch, name, resourcePath, uid])
+  }, [apiFetch, name, resourcePath, uid, reference?.uid])
 
-  const progress = provisioningProgress(item)
+  const progress = provisioningProgress(run)
   const color = progress.phase === 'Blocked' ? 'red' : progress.phase === 'Succeeded' ? 'green' : 'blue'
   return <Paper withBorder p="lg" radius="md" mb="lg" aria-label="Provisioning checkpoints">
     <Group justify="space-between" mb="sm">
-      <Title order={2} size="h4">Provisioning · request {progress.request}</Title>
+      <Title order={2} size="h4">Provisioning · {progress.request}</Title>
       <Badge color={color}>{progress.phase}</Badge>
     </Group>
     <Text size="sm" c="dimmed" mb="md">
-      Last verified request: {progress.observed} · Updates every 5 seconds while this page is visible.
+      Last verified run: {item.status?.provisioning?.lastSuccessfulRunRef?.name || 'None'} · Updates every 5 seconds while this page is visible.
     </Text>
     {error && <Alert color="yellow" mb="md">{error}</Alert>}
     {progress.phase === 'Blocked' && <Alert color="red" mb="md" title="Provisioning blocked">

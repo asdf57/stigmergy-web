@@ -40,24 +40,24 @@ npm run preview
 ## Server provisioning
 
 Servers have a **Provision** action in list rows/cards and detail pages. Configure
-the stable target disk, supported OS, boot ISO and SSH CA first. The confirmation
-shows the disk/OS/ISO and requires the exact Server name: it authorizes permanent
-replacement of that disk, not a normal reboot.
+the supported OS, boot ISO, SSH CA and provisioning.enabled first. This flag
+alone never installs. The dialog fetches the bound Machine's discovered disks
+and shows model, capacity, serial/WWN and transport. Select one system disk;
+USB, unidentified and ambiguous devices are unavailable. Type the exact Server
+name to authorize permanent replacement of the selected disk, not a normal reboot.
 
-Confirmation sends one conditional spec merge PATCH enabling provisioning and
-incrementing `reprovision` by one. It does not directly invoke Concourse or alter
-status; the shared operator consumes desired state on its next run. Server detail
-pages show each workflow checkpoint and automatically refresh observed status
-every five seconds while visible. The panel shows request/verified counters,
-the current phase, maintenance/failure message, attempt and operator build ID,
-and timestamps when the API supplies them. It is a workflow view, not a persisted
-event history: earlier stages are not invented completion events. A newly queued
-request does not reuse the previous attempt's message or build ID. Refresh
-errors retain the last status with a warning, and stale responses cannot overwrite
-a newer request. Pending/active work,
-maintenance, paused/deleting resources or incomplete configuration disable the
-action. A conflict requires refreshing and confirming again, never an automatic
-retry.
+Confirmation POSTs an immutable ProvisioningRun with the Server/Machine UIDs,
+reviewed Server generation and selected disk ID. The API atomically reserves the
+Server; it conflicts if the desired configuration/binding changed or another run
+already owns it. No automatic retry or direct Concourse invocation occurs.
+
+Server detail follows activeRunRef/lastRunRef and polls Server/run status every
+five seconds while visible. The panel shows every workflow checkpoint, current
+phase, failure/maintenance message, run/build identity and timestamps. It is a
+workflow view, not an invented event history. LastSuccessfulRunRef remains the
+last verified installation even when a later run fails. Refresh failures retain
+the last status, and stale/replaced-UID responses cannot overwrite it. Reserved,
+paused/deleting/unbound or incomplete Servers cannot request another run.
 
 Run `npm test` for request/safety regression checks. Tests use mocked requests;
 never click the real provisioning confirmation during a UI smoke test.

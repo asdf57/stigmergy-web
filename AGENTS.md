@@ -4,16 +4,16 @@
   `src/AppMantine.jsx`. Reuse `apiFetch`/`authorizedFetch` for same-origin bearer
   auth and error handling; do not add a separate auth scheme or leak tokens to
   external links.
-- Server provisioning uses `ServerProvisionButton.jsx` and the small tested
-  `serverProvisioning.js` request/guard helpers. It is a desired-state spec PATCH,
-  not a direct pipeline trigger or an invented API action endpoint.
-- `ServerProvisionProgress.jsx` displays the checkpoint workflow and polls
-  generic Server GET every five seconds while visible. Derive display states
+- Server provisioning uses `ServerProvisionButton.jsx` and tested helpers in
+  `serverProvisioning.js`. Fetch UID-bound Machine storage, select one system disk
+  and POST an immutable ProvisioningRun; never PATCH disk/counters into Server.
+- `ServerProvisionProgress.jsx` follows activeRunRef/lastRunRef and polls generic
+  Server and ProvisioningRun GET every five seconds while visible. Derive states
   in `serverProvisioningProgress.js`; do not invent persisted event history or
-  completed/skipped stages. Keep request counters separate from the previous
-  attempt and reject stale/replaced-UID poll responses. Polling must never write.
-- Show the approved stable disk and OS/ISO, require exact-name confirmation,
-  increment the counter once and use If-Match. Never silently retry conflicts
+  completed/skipped stages. Keep run identities separate and reject stale or
+  replaced-UID poll responses. Polling must never write.
+- Show discovered disks and OS/ISO, require exact-name confirmation, and send
+  the reviewed Server generation plus Server/Machine UIDs. Never retry conflicts
   or queue duplicate pending/active requests. A Provision click authorizes disk
   replacement; do not trigger a real node when testing UI code.
 - Use `npm test`, `node src/serverProvisioning.test.js` for detailed case output,

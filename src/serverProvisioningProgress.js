@@ -1,5 +1,3 @@
-import { serverProvisioningPhase } from './serverProvisioning.js'
-
 export const provisioningSteps = [
   ['Queued', 'Queued', 'Waiting for the operator to claim the request.'],
   ['PreparingBoot', 'Preparing boot', 'Checking identities, reserving maintenance and preparing the boot path.'],
@@ -10,22 +8,19 @@ export const provisioningSteps = [
   ['Succeeded', 'Succeeded', 'Installed-system verification completed.'],
 ]
 
-export function provisioningProgress(server) {
-  const status = server.status?.provisioning || {}
-  const phase = serverProvisioningPhase(server)
-  const currentRequest = server.spec?.provisioning?.reprovision ?? 0
-  const currentAttempt = status.requestedReprovision === currentRequest && phase !== 'Queued'
+export function provisioningProgress(run) {
+  const status = run?.status || {}
+  const phase = status.phase === 'Pending' ? 'Queued' : status.phase || 'Not requested'
   const index = provisioningSteps.findIndex(([key]) => key === phase)
   return {
     phase,
-    request: currentRequest,
-    observed: status.observedReprovision ?? 0,
-    message: currentAttempt ? status.message : '',
-    buildID: currentAttempt ? status.backendRunID : null,
-    attemptID: currentAttempt ? status.attemptID : null,
+    request: run?.metadata?.name || 'No run',
+    message: status.message || '',
+    buildID: status.backendRunID,
+    attemptID: status.attemptID,
     maintenance: Boolean(status.maintenance),
-    startedAt: currentAttempt ? status.startedAt : null,
-    completedAt: currentAttempt ? status.completedAt : null,
+    startedAt: status.startedAt,
+    completedAt: status.completedAt,
     steps: provisioningSteps.map(([key, label, description], position) => ({
       key, label, description,
       state: index < 0 ? 'unconfirmed' : position === index ? 'current' : position < index ? 'earlier' : 'pending',

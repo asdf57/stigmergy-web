@@ -1,40 +1,53 @@
-const activePhases = new Set(['PreparingBoot', 'AwaitingLive', 'Installing', 'AwaitingInstalled', 'Verifying'])
-
 export function serverProvisioningPhase(server) {
-  const desired = server.spec?.provisioning || {}
   const status = server.status?.provisioning || {}
-  const counter = desired.reprovision ?? 0
-  if (status.maintenance || activePhases.has(status.phase)) return status.phase || 'Blocked'
-  const terminalCurrentRequest = ['Blocked', 'Succeeded'].includes(status.phase) && status.requestedReprovision === counter
-  if (desired.enabled && !terminalCurrentRequest && (!status.provisioned || counter > (status.observedReprovision ?? 0))) return 'Queued'
-  return status.phase || server.status?.phase || 'Active'
+  if (status.activeRunRef) return 'Provisioning'
+  if (status.maintenance) return 'Blocked'
+  return status.provisioned ? 'Provisioned' : server.status?.phase || 'Awaiting installation'
 }
 
 export function provisionBlockReason(server) {
-  const desired = server.spec?.provisioning || {}
   const status = server.status?.provisioning || {}
   const os = server.spec?.operatingSystem || {}
-  const counter = desired.reprovision ?? 0
   if (server.metadata?.deletionTimestamp) return 'This Server is being deleted.'
-  if (status.maintenance || activePhases.has(status.phase)) return 'An attempt owns this Server. Finish or inspect recovery before requesting another.'
-  if (server.spec?.reconciliation?.paused) return 'Server reconciliation is paused. Resume it before provisioning.'
-  if (!/^\/dev\/disk\/by-id\/[^/]+$/.test(desired.targetDisk || '')) return 'Edit the Server to configure an approved /dev/disk/by-id/ target disk first.'
+  if (status.maintenance || status.activeRunRef) return 'A run owns this Server. Finish or inspect recovery before requesting another.'
+  if (!server.spec?.provisioning?.enabled) return 'Enable provisioning in the Server configuration first; enabling it does not erase disks.'
+  if (server.spec?.reconciliation?.paused) return 'Server reconciliation is paused.'
+  if (!server.status?.machineRef?.uid) return 'Waiting for a discovered Machine binding.'
+  if (!Number.isSafeInteger(server.metadata?.generation) || server.metadata.generation < 1) return 'Refresh to obtain the current Server generation.'
+  if (server.status?.hostSSH?.phase !== 'Ready') return 'Waiting for verified management SSH access.'
   if (os.architecture !== 'amd64' || os.bootMode !== 'uefi' || ![['arch', 'rolling'], ['debian', 'trixie']].some(([distribution, version]) => os.distribution === distribution && os.version === version)) return 'Configure a supported amd64 UEFI target: Arch rolling or Debian trixie.'
   if (!server.spec?.boot?.isoRef?.name || !server.spec?.sshCertificateAuthorityRef?.name) return 'Configure the boot ISO and SSH certificate authority first.'
-  if (!Number.isSafeInteger(counter) || counter < 0 || counter >= Number.MAX_SAFE_INTEGER) return 'The reprovision counter cannot be safely incremented in this browser.'
-  if (!server.metadata?.resourceVersion) return 'Refresh to obtain the Server resource version.'
-  const terminalCurrentRequest = ['Blocked', 'Succeeded'].includes(status.phase) && status.requestedReprovision === counter
-  if (desired.enabled && !terminalCurrentRequest && (!status.provisioned || counter > (status.observedReprovision ?? 0))) return 'A provisioning request is already pending.'
   return ''
 }
 
-export async function requestServerProvision(apiFetch, resourcePath, server, etag, confirmation) {
+export function diskDeviceID(disk) {
+  if (disk.wwn) return `wwn:${disk.wwn.toLowerCase()}`
+  return disk.serial ? `serial:${disk.serial}` : ''
+}
+
+export function provisionDisks(machine) {
+  const disks = machine.status?.inventory?.storage || []
+  return disks.map(disk => {
+    const id = diskDeviceID(disk)
+    const eligible = disk.type === 'disk' && ['sata', 'ata', 'nvme'].includes(disk.tran) && id && disks.filter(other => diskDeviceID(other) === id).length === 1
+    return { ...disk, deviceID: id, eligible: Boolean(eligible) }
+  })
+}
+
+export async function requestServerProvision(apiFetch, resourcePath, server, machine, deviceID, confirmation, runName) {
   const blocked = provisionBlockReason(server)
   if (blocked) throw new Error(blocked)
   if (confirmation !== server.metadata.name) throw new Error('Type the exact Server name to confirm disk replacement.')
-  return apiFetch(`${resourcePath}/${encodeURIComponent(server.metadata.name)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/merge-patch+json', 'If-Match': etag || `"${server.metadata.resourceVersion}"` },
-    body: JSON.stringify({ provisioning: { enabled: true, reprovision: (server.spec.provisioning.reprovision ?? 0) + 1 } }),
+  const reference = server.status.machineRef
+  if (machine.metadata.name !== reference.name || machine.metadata.uid !== reference.uid || machine.metadata.deletionTimestamp) throw new Error('The bound Machine changed. Refresh and select the disk again.')
+  if (!provisionDisks(machine).some(disk => disk.eligible && disk.deviceID === deviceID)) throw new Error('Select one uniquely identified SATA/NVMe system disk.')
+  const name = runName || `provision-${crypto.randomUUID()}`
+  return apiFetch(resourcePath.replace(/\/servers$/, '/provisioning-runs'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiVersion: 'homelab.io/v1alpha1', kind: 'ProvisioningRun', metadata: { name }, spec: {
+      serverRef: { name: server.metadata.name, uid: server.metadata.uid },
+      serverGeneration: server.metadata.generation,
+      machineRef: reference, storage: { disks: [{ deviceID, role: 'system' }] },
+    } }),
   })
 }
