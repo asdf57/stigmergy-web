@@ -36,3 +36,21 @@ VITE_FILE_REGISTRY_URL=https://files.example.com/ npm run dev
 npm run build
 npm run preview
 ```
+
+## Server provisioning
+
+Servers have a **Provision** action in list rows/cards and detail pages. Configure
+the stable target disk, supported OS, boot ISO and SSH CA first. The confirmation
+shows the disk/OS/ISO and requires the exact Server name: it authorizes permanent
+replacement of that disk, not a normal reboot.
+
+Confirmation sends one conditional spec merge PATCH enabling provisioning and
+incrementing `reprovision` by one. It does not directly invoke Concourse or alter
+status; the shared operator consumes desired state on its next run. Refresh the
+Server to see its provisioning phase and observed counter. Pending/active work,
+maintenance, paused/deleting resources or incomplete configuration disable the
+action. A conflict requires refreshing and confirming again, never an automatic
+retry.
+
+Run `npm test` for request/safety regression checks. Tests use mocked requests;
+never click the real provisioning confirmation during a UI smoke test.
