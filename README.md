@@ -46,8 +46,15 @@ replacement of that disk, not a normal reboot.
 
 Confirmation sends one conditional spec merge PATCH enabling provisioning and
 incrementing `reprovision` by one. It does not directly invoke Concourse or alter
-status; the shared operator consumes desired state on its next run. Refresh the
-Server to see its provisioning phase and observed counter. Pending/active work,
+status; the shared operator consumes desired state on its next run. Server detail
+pages show each workflow checkpoint and automatically refresh observed status
+every five seconds while visible. The panel shows request/verified counters,
+the current phase, maintenance/failure message, attempt and operator build ID,
+and timestamps when the API supplies them. It is a workflow view, not a persisted
+event history: earlier stages are not invented completion events. A newly queued
+request does not reuse the previous attempt's message or build ID. Refresh
+errors retain the last status with a warning, and stale responses cannot overwrite
+a newer request. Pending/active work,
 maintenance, paused/deleting resources or incomplete configuration disable the
 action. A conflict requires refreshing and confirming again, never an automatic
 retry.

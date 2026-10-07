@@ -7,6 +7,11 @@
 - Server provisioning uses `ServerProvisionButton.jsx` and the small tested
   `serverProvisioning.js` request/guard helpers. It is a desired-state spec PATCH,
   not a direct pipeline trigger or an invented API action endpoint.
+- `ServerProvisionProgress.jsx` displays the checkpoint workflow and polls
+  generic Server GET every five seconds while visible. Derive display states
+  in `serverProvisioningProgress.js`; do not invent persisted event history or
+  completed/skipped stages. Keep request counters separate from the previous
+  attempt and reject stale/replaced-UID poll responses. Polling must never write.
 - Show the approved stable disk and OS/ISO, require exact-name confirmation,
   increment the counter once and use If-Match. Never silently retry conflicts
   or queue duplicate pending/active requests. A Provision click authorizes disk
