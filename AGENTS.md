@@ -19,3 +19,7 @@
   restart the API or unrelated services for frontend-only changes.
 - Verify the served HTML/assets after rollout without issuing a provisioning
   request. Keep tokens/private env files out of source control and logs.
+- The live UI is `https://stigmergy-ui.ryuugu.dev/`, not the API hostname
+  `https://stigmergy.ryuugu.dev/`. A 401 at the API's `/` is not a frontend
+  outage. Check the UI HTML's current hashed asset and UI `/readyz`; the latter
+  proxies API readiness. Never test a Provision action against a real disk.
