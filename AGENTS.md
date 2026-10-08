@@ -16,6 +16,10 @@
   the reviewed Server generation plus Server/Machine UIDs. Never retry conflicts
   or queue duplicate pending/active requests. A Provision click authorizes disk
   replacement; do not trigger a real node when testing UI code.
+- Provision OS/version/ISO choices come from current Ready ISO resources, filtered
+  to installer-supported targets. Confirmation conditionally saves Server OS/boot
+  spec before run creation; failures can leave desired spec saved without a run.
+  Require refresh/review, never silently retry or roll back.
 - Use `npm test`, `node src/serverProvisioning.test.js` for detailed case output,
   and `npm run build`. Safety tests use mock fetch callbacks only.
 - The deployed source checkout is `/srv/homelab/stigmergy-web`. Fast-forward the
