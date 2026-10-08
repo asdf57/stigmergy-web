@@ -62,15 +62,16 @@ test('selected OS and ISO are saved with CAS; run uses returned generation', asy
   const calls = []
   await requestServerProvision(async (path, options) => {
     calls.push([path, options])
+    if (!options) return { body: { ...item, metadata: { ...item.metadata, resourceVersion: '20' } } }
     if (options.method === 'PATCH') {
-      assert.equal(options.headers['If-Match'], '"10"')
+      assert.equal(options.headers['If-Match'], '"20"')
       const patch = JSON.parse(options.body)
       assert.deepEqual(patch, { operatingSystem: iso().spec, boot: { isoRef: selection().target.isoRef } })
       return { body: { ...item, metadata: { ...item.metadata, generation: 2, resourceVersion: '11' }, spec: { ...item.spec, operatingSystem: { ...item.spec.operatingSystem, ...patch.operatingSystem }, boot: patch.boot } } }
     }
     assert.equal(JSON.parse(options.body).spec.serverGeneration, 2)
   }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection())
-  assert.deepEqual(calls.map(([path, options]) => [path, options.method]), [['/api/v1alpha1/servers/beelink', 'PATCH'], ['/api/v1alpha1/provisioning-runs', 'POST']])
+  assert.deepEqual(calls.map(([path, options]) => [path, options?.method || 'GET']), [['/api/v1alpha1/servers/beelink', 'GET'], ['/api/v1alpha1/servers/beelink', 'PATCH'], ['/api/v1alpha1/provisioning-runs', 'POST']])
   assert.equal(item.spec.operatingSystem.distribution, 'arch')
 })
 
@@ -87,7 +88,7 @@ test('invalid selection or confirmation cannot even save an OS', async () => {
 
 test('OS save conflicts never create a run or retry', async () => {
   const item = server(); item.metadata.resourceVersion = '10'; let calls = 0
-  await assert.rejects(requestServerProvision(async (_, options) => { calls++; assert.equal(options.method, 'PATCH'); throw new Error('Conflict') }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection()), /Conflict/)
+  await assert.rejects(requestServerProvision(async (_, options) => { if (!options) return { body: item }; calls++; assert.equal(options.method, 'PATCH'); throw new Error('Conflict') }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection()), /Conflict/)
   assert.equal(calls, 1)
 })
 
@@ -99,7 +100,16 @@ test('failed run creation explains that desired OS may already be saved', async 
 test('replaced Server after OS save never creates a run', async () => {
   const item = server(); item.metadata.resourceVersion = '10'
   await assert.rejects(requestServerProvision(async (_, options) => {
+    if (!options) return { body: item }
     assert.equal(options.method, 'PATCH')
     return { body: { ...item, metadata: { ...item.metadata, uid: 'replacement' }, spec: { ...item.spec, operatingSystem: iso().spec, boot: { isoRef: selection().target.isoRef } } } }
   }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection()), /Server changed/)
+})
+
+test('fresh-read desired-generation changes cannot save OS or create a run', async () => {
+  const item = server(); item.metadata.resourceVersion = '10'
+  await assert.rejects(requestServerProvision(async (_, options) => {
+    assert.equal(options, undefined)
+    return { body: { ...item, metadata: { ...item.metadata, generation: 2 } } }
+  }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection()), /desired configuration or binding changed/)
 })

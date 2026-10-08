@@ -56,6 +56,9 @@ export async function requestServerProvision(apiFetch, resourcePath, server, mac
     const fields = ['distribution', 'version', 'architecture', 'bootMode']
     if (!target || !targets?.some(candidate => fields.every(field => candidate[field] === target[field]) && candidate.isoRef.uid === target.isoRef?.uid && candidate.isoRef.name === target.isoRef?.name)) throw new Error('Select an OS/version with an available supported ISO.')
     if (fields.some(field => server.spec.operatingSystem?.[field] !== target[field]) || server.spec.boot?.isoRef?.name !== target.isoRef.name || server.spec.boot?.isoRef?.uid !== target.isoRef.uid) {
+      const { body: fresh } = await apiFetch(`${resourcePath}/${encodeURIComponent(server.metadata.name)}`)
+      if (fresh.metadata.uid !== serverUID || fresh.metadata.generation !== server.metadata.generation || fresh.status?.machineRef?.uid !== reference.uid || fresh.status?.machineRef?.name !== reference.name || provisionBlockReason(fresh, { selectOperatingSystem: true })) throw new Error('Server desired configuration or binding changed. Refresh and review before requesting provisioning.')
+      server = fresh
       if (!server.metadata.resourceVersion) throw new Error('Refresh to obtain the current Server resource version.')
       const updated = await apiFetch(`${resourcePath}/${encodeURIComponent(server.metadata.name)}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/merge-patch+json', 'If-Match': `"${server.metadata.resourceVersion}"` },

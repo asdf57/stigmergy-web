@@ -7,6 +7,10 @@
 - Server provisioning uses `ServerProvisionButton.jsx` and tested helpers in
   `serverProvisioning.js`. Fetch UID-bound Machine storage, select one system disk
   and POST an immutable ProvisioningRun; never PATCH disk/counters into Server.
+- `ServerRebootButton.jsx` creates ordinary UID-bound single-Server Commands via
+  the reviewed system-operation helper; discover Ready executors from current
+  capture membership. Do not test by rebooting a real Server. Agent pulse derives
+  freshness from API-received `status.agent.lastSeenTime`, not `reachable` or SSH.
 - `ServerProvisionProgress.jsx` follows activeRunRef/lastRunRef and polls generic
   Server and ProvisioningRun GET every five seconds while visible. Derive states
   in `serverProvisioningProgress.js`; do not invent persisted event history or

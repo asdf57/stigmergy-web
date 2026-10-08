@@ -77,3 +77,8 @@ body,
     transition-duration: 0.01ms !important;
   }
 }
+/* Reporting is agent freshness, not host/SSH availability. */
+.agent-pulse-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.agent-pulse-dot.reporting { animation: agent-pulse 1.8s ease-in-out infinite; }
+@keyframes agent-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .agent-pulse-dot.reporting { animation: none; } }
