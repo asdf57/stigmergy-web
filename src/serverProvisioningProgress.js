@@ -8,12 +8,13 @@ export const provisioningSteps = [
   ['Succeeded', 'Succeeded', 'Installed-system verification completed.'],
 ]
 
-export function provisioningProgress(run) {
+export function provisioningProgress(run, server) {
   const status = run?.status || {}
   const phase = status.phase === 'Pending' ? 'Queued' : status.phase || 'Not requested'
   const index = provisioningSteps.findIndex(([key]) => key === phase)
   return {
     phase,
+    released: phase === 'Blocked' && status.maintenance === false && Boolean(server) && !server.status?.provisioning?.maintenance && !server.status?.provisioning?.activeRunRef,
     request: run?.metadata?.name || 'No run',
     message: status.message || '',
     buildID: status.backendRunID,

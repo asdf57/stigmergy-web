@@ -51,19 +51,20 @@ export default function ServerProvisionProgress({ item, resourcePath, apiFetch, 
     }
   }, [apiFetch, name, resourcePath, uid, reference?.uid])
 
-  const progress = provisioningProgress(run)
+  const progress = provisioningProgress(run, item)
   const color = progress.phase === 'Blocked' ? 'red' : progress.phase === 'Succeeded' ? 'green' : 'blue'
   return <Paper withBorder p="lg" radius="md" mb="lg" aria-label="Provisioning checkpoints">
     <Group justify="space-between" mb="sm">
       <Title order={2} size="h4">Provisioning · {progress.request}</Title>
-      <Badge color={color}>{progress.phase}</Badge>
+      <Badge color={color}>{progress.released ? 'Failed · cleanup complete' : progress.phase}</Badge>
     </Group>
     <Text size="sm" c="dimmed" mb="md">
       Last verified run: {item.status?.provisioning?.lastSuccessfulRunRef?.name || 'None'} · Updates every 5 seconds while this page is visible.
     </Text>
     {error && <Alert color="yellow" mb="md">{error}</Alert>}
-    {progress.phase === 'Blocked' && <Alert color="red" mb="md" title="Provisioning blocked">
+    {progress.phase === 'Blocked' && <Alert color="red" mb="md" title={progress.released ? 'Last attempt failed — cleanup complete' : 'Provisioning blocked'}>
       {progress.message || 'Inspect the operator build before requesting another attempt.'}
+      {progress.released && <Text size="sm" mt="xs">No active provisioning request. Use Provision to select a disk and explicitly request a new run.</Text>}
       {progress.maintenance && <Text size="sm" mt="xs">Maintenance is retained; recovery must be inspected before another request.</Text>}
     </Alert>}
     <Stack gap="xs" role="list" aria-live="polite">
