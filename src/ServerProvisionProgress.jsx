@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Badge, Code, Group, Paper, Stack, Text, Title } from '@mantine/core'
+import { Alert, Badge, Button, Code, Group, Paper, Stack, Text, Title } from '@mantine/core'
 import { acceptProvisioningUpdate, provisioningProgress } from './serverProvisioningProgress.js'
+import { deleteBlockedProvision } from './deleteBlockedProvision.js'
 
 export default function ServerProvisionProgress({ item, resourcePath, apiFetch, onUpdate }) {
   const [error, setError] = useState('')
   const [run, setRun] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const update = useRef(onUpdate)
   update.current = onUpdate
   const name = item.metadata.name
@@ -53,6 +55,17 @@ export default function ServerProvisionProgress({ item, resourcePath, apiFetch, 
 
   const progress = provisioningProgress(run, item)
   const color = progress.phase === 'Blocked' ? 'red' : progress.phase === 'Succeeded' ? 'green' : 'blue'
+  const removeBlocked = async () => {
+    if (!window.confirm(`Delete the blocked provisioning request for ${name}? This loses its history and unlocks Provision. It does not repair, reboot or clean up the machine. A new request will erase the selected disk again.`)) return
+    setDeleting(true)
+    try {
+      const result = await deleteBlockedProvision(apiFetch, resourcePath, item, run)
+      update.current(result)
+      setRun(null)
+      setError('')
+    } catch (caught) { setError(caught.message) }
+    finally { setDeleting(false) }
+  }
   return <Paper withBorder p="lg" radius="md" mb="lg" aria-label="Provisioning checkpoints">
     <Group justify="space-between" mb="sm">
       <Title order={2} size="h4">Provisioning · {progress.request}</Title>
@@ -65,7 +78,8 @@ export default function ServerProvisionProgress({ item, resourcePath, apiFetch, 
     {progress.phase === 'Blocked' && <Alert color="red" mb="md" title={progress.released ? 'Last attempt failed — cleanup complete' : 'Provisioning blocked'}>
       {progress.message || 'Inspect the operator build before requesting another attempt.'}
       {progress.released && <Text size="sm" mt="xs">No active provisioning request. Use Provision to select a disk and explicitly request a new run.</Text>}
-      {progress.maintenance && <Text size="sm" mt="xs">Maintenance is retained; recovery must be inspected before another request.</Text>}
+      {progress.maintenance && <Text size="sm" mt="xs">Delete this blocked request to unlock Provision and explicitly request a fresh installation. Deletion does not change the machine.</Text>}
+      {item.status?.provisioning?.activeRunRef?.uid === run?.metadata.uid && <Button color="red" variant="light" mt="sm" loading={deleting} onClick={removeBlocked}>Delete blocked request</Button>}
     </Alert>}
     <Stack gap="xs" role="list" aria-live="polite">
       {progress.steps.map(step => <Group key={step.key} align="flex-start" wrap="nowrap" role="listitem">
