@@ -61,3 +61,26 @@ paused/deleting/unbound or incomplete Servers cannot request another run.
 
 Run `npm test` for request/safety regression checks. Tests use mocked requests;
 never click the real provisioning confirmation during a UI smoke test.
+
+## Resource inspection
+
+All discovered resource kinds appear in navigation, including a fallback category
+for new API kinds. List pages filter by text, reported phase, related Server and
+labels (for example `cluster=lab`). Server filters use explicit resource references;
+the UI does not infer command targets by parsing scripts.
+
+Detail pages show clickable named references, readable controller conditions,
+checkpoint/failure messages and reported generations. Server storage panels load
+the UID-bound Machine and this Server's DiskPartitions, displaying desired layouts
+separately from discovered disks/filesystems. Refresh storage to read newer reports.
+These panels only read resources; they never reconcile storage or create requests.
+
+SSHCertificate details show validity/expiry/renewal dates. Server and ISO details
+compare desired trust digests with reported installed or completed-image digests.
+Matching digests and valid dates alone are not proof of live health/readiness.
+
+Pipeline, ISO, CommandsPipeline and Command details resolve Concourse links through
+the recorded Pipeline/provider. Commands link to their recorded global build ID.
+ProvisioningRun currently lacks a provider-qualified build reference, so the UI
+shows its reported backend ID without guessing a pipeline or build URL. Unknown or
+replaced references are surfaced rather than silently linked to another execution.

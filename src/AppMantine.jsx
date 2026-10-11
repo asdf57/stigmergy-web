@@ -14,6 +14,11 @@ import ServerAgentPulse from './ServerAgentPulse.jsx'
 import ServerProvisionProgress from './ServerProvisionProgress.jsx'
 import { acceptProvisioningUpdate } from './serverProvisioningProgress.js'
 import { serverProvisioningPhase } from './serverProvisioning.js'
+import { discoverResources, groupResources, humanize, referenceKinds } from './resourceCatalog.js'
+import ResourceInsights from './ResourceInsights.jsx'
+import ServerStoragePanel from './ServerStoragePanel.jsx'
+import ResourceListFilters from './ResourceListFilters.jsx'
+import { filterResources } from './resourceInsights.js'
 import { useDisclosure, useMediaQuery } from '@mantine/hooks'
 import {
   Activity, AlertTriangle, ArrowLeft, Boxes, Check, ChevronRight, CircleDot, Code2,
@@ -27,15 +32,7 @@ function ShellScriptWidget(props) { return <Suspense fallback={<Skeleton height=
 
 const EMPTY_SPEC = { paths: {}, components: { schemas: {} } }
 const FILE_REGISTRY_URL = import.meta.env.VITE_FILE_REGISTRY_URL || 'https://copyparty.ryuugu.dev/'
-const groups = [
-  ['Infrastructure', ['Machine', 'MachineReport', 'Server', 'Router', 'DNSRecord'], Server],
-  ['Automation', ['ISO', 'Pipeline', 'PipelineProvider', 'CommandsPipeline', 'Command'], Activity],
-  ['Inventory', ['InventoryCaptureGroup', 'InventoryPublication', 'GitRepository'], Database],
-  ['Security', ['SecretStore', 'Secret', 'SSHKeyPair', 'SSHCertificateAuthority', 'UsernamePasswordCredential'], Shield],
-]
-
-const humanize = (value = '') => value.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-const pluralLabel = (kind) => kind.endsWith('y') ? `${humanize(kind.slice(0, -1))}ies` : kind.endsWith('s') ? `${humanize(kind)}es` : `${humanize(kind)}s`
+const groupIcons = { Infrastructure: Server, Automation: Activity, Inventory: Database, Security: Shield }
 const navigate = (path = '') => { window.location.hash = path ? `#/${path}` : '#/' }
 
 function useHashRoute() {
@@ -65,18 +62,6 @@ async function apiFetch(path, options = {}) {
   return { body, response }
 }
 
-function discoverResources(spec) {
-  return Object.entries(spec.paths || {}).flatMap(([path, pathItem]) => {
-    if (!path.startsWith('/api/') || path.includes('{') || !pathItem.post || !pathItem.get) return []
-    const ref = pathItem.post.requestBody?.content?.['application/json']?.schema?.$ref
-    const createSchema = ref?.split('/').pop()
-    const schema = spec.components?.schemas?.[createSchema]
-    const kind = schema?.properties?.kind?.const || pathItem.post.operationId?.replace(/^create/, '')
-    if (!kind) return []
-    return [{ kind, label: pluralLabel(kind), path, slug: path.split('/').pop(), createSchema, specSchema: schema?.properties?.spec?.$ref?.split('/').pop(), apiVersion: schema?.properties?.apiVersion?.const || 'homelab.io/v1alpha1' }]
-  }).sort((a, b) => a.label.localeCompare(b.label))
-}
-
 function dereference(schema, components, seen = new Set()) {
   if (!schema || typeof schema !== 'object') return schema
   if (schema.$ref) {
@@ -86,22 +71,6 @@ function dereference(schema, components, seen = new Set()) {
   }
   if (Array.isArray(schema)) return schema.map((entry) => dereference(entry, components, seen))
   return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== 'readOnly').map(([key, value]) => [key, dereference(value, components, seen)]))
-}
-
-const referenceKinds = {
-  authorizedKeyRefs: 'SSHKeyPair',
-  commandsRepositoryRef: 'GitRepository',
-  credentialRef: 'UsernamePasswordCredential',
-  inventoryCaptureGroupRef: 'InventoryCaptureGroup',
-  pipelineProviderRef: 'PipelineProvider',
-  providerRef: 'PipelineProvider',
-  secretStoreRef: 'SecretStore',
-  sshKeyPairRef: 'SSHKeyPair',
-  signingKeyRef: 'SSHKeyPair',
-  trustedKeyRefs: 'SSHKeyPair',
-  sshCertificateAuthorityRef: 'SSHCertificateAuthority',
-  repositoryRef: 'GitRepository',
-  isoRef: 'ISO',
 }
 
 const constrainedReferenceKinds = {
@@ -282,8 +251,8 @@ function Sidebar({ resources, route, close }) {
     <Divider />
     <AppShell.Section grow component={ScrollArea} p="sm">
       <NavLink label="Overview" leftSection={<Home size={18} />} active={!route[0]} onClick={() => { navigate(); close() }} variant="light" />
-      {groups.map(([label, kinds, GroupIcon]) => {
-        const items = resources.filter((resource) => kinds.includes(resource.kind))
+      {groupResources(resources).map(({ label, resources: items }) => {
+        const GroupIcon = groupIcons[label] || Boxes
         return items.length ? <Box key={label} mt="lg"><Group gap={7} px="sm" mb={5}><GroupIcon size={13} /><Text size="xs" fw={750} c="dimmed" tt="uppercase" lts=".06em">{label}</Text></Group>{items.map((resource) => <NavLink key={resource.kind} label={resource.label} active={route[0] === 'resources' && route[1] === resource.slug} onClick={() => { navigate(`resources/${resource.slug}`); close() }} variant="light" />)}</Box> : null
       })}
       <Box mt="lg"><Group gap={7} px="sm" mb={5}><HardDrive size={13} /><Text size="xs" fw={750} c="dimmed" tt="uppercase" lts=".06em">Artifacts</Text></Group><NavLink component="a" href={FILE_REGISTRY_URL} target="_blank" rel="noreferrer" label="File registry" leftSection={<Package size={17} />} rightSection={<ExternalLink size={13} />} onClick={close} variant="light" /></Box>
@@ -317,14 +286,16 @@ function Loading() { return <Stack>{[1, 2, 3].map((key) => <Skeleton key={key} h
 function ErrorView({ message, retry }) { return <Alert color="red" title="Could not load this view" withCloseButton={false}>{message}{retry && <Button color="red" variant="light" size="xs" mt="sm" onClick={retry}>Try again</Button>}</Alert> }
 
 function ResourceList({ resource }) {
+  const [filters, setFilters] = useState({ phase: '', server: '', label: '' })
   const mobile = useMediaQuery('(max-width: 48em)'); const [state, setState] = useState({ loading: true, items: [], error: '' }); const [query, setQuery] = useState('')
   const load = useCallback(async () => { setState((value) => ({ ...value, loading: true, error: '' })); try { const { body } = await apiFetch(resource.path); setState({ loading: false, items: body.items || [], error: '' }) } catch (error) { setState({ loading: false, items: [], error: error.message }) } }, [resource.path])
   useEffect(() => { load() }, [load])
-  const items = state.items.filter((item) => `${item.metadata?.name} ${resourceStatus(item)} ${Object.values(item.metadata?.labels || {}).join(' ')}`.toLowerCase().includes(query.toLowerCase()))
+  const items = filterResources(state.items, { ...filters, query }, resourceStatus)
   const provisioningAction = (item) => resource.kind === 'Server' ? <Group gap="xs"><ServerAgentPulse item={item} resourcePath={resource.path} apiFetch={apiFetch} /><ServerRebootButton item={item} resourcePath={resource.path} apiFetch={apiFetch} compact onRequested={({ body }) => showNotice(`${body.metadata.name} queued`)} /><ServerProvisionButton item={item} resourcePath={resource.path} apiFetch={apiFetch} compact onRequested={({ body }) => { showNotice(`${body.metadata.name} queued`); load() }} /></Group> : null
   const actions = <><Button variant="default" leftSection={<RefreshCw size={15} />} onClick={load}>Refresh</Button><Button leftSection={<Plus size={16} />} onClick={() => navigate(`resources/${resource.slug}/new`)}>Create</Button></>
   return <><PageTitle overline="Resources" title={resource.label} description={`Manage ${humanize(resource.kind).toLowerCase()} desired state and controller status.`} actions={actions} />
     <Group justify="space-between" align="center" mb="md"><TextInput leftSection={<Search size={16} />} placeholder={`Search ${resource.label.toLowerCase()}…`} value={query} onChange={(event) => setQuery(event.currentTarget.value)} w={{ base: '100%', sm: 420 }} /><Text size="xs" c="dimmed">{items.length} results</Text></Group>
+    <ResourceListFilters items={state.items} phaseOf={resourceStatus} filters={filters} onChange={setFilters} />
     {state.error ? <ErrorView message={state.error} retry={load} /> : state.loading ? <Loading /> : !state.items.length ? <Paper withBorder radius="lg" py={70} px="xl" ta="center"><ThemeIcon size={54} radius="lg" variant="light" mb="md"><Boxes /></ThemeIcon><Title order={3}>No {resource.label.toLowerCase()} yet</Title><Text c="dimmed" mb="lg">Create the first {humanize(resource.kind).toLowerCase()}.</Text><Button leftSection={<Plus size={16} />} onClick={() => navigate(`resources/${resource.slug}/new`)}>Create resource</Button></Paper> : mobile ? <Stack gap="sm">{items.map((item) => <Card key={item.metadata.name} withBorder onClick={() => navigate(`resources/${resource.slug}/${encodeURIComponent(item.metadata.name)}`)} className="clickable-card"><Group wrap="nowrap"><Box style={{ flex: 1, minWidth: 0 }}><Text fw={700}>{item.metadata.name}</Text><Text size="xs" c="dimmed">Generation {item.metadata.generation ?? '—'}</Text></Box><StatusBadge status={resourceStatus(item)} />{provisioningAction(item)}<ChevronRight size={17} /></Group></Card>)}</Stack> : <Table.ScrollContainer minWidth={760}><Table striped highlightOnHover withTableBorder verticalSpacing="md"><Table.Thead><Table.Tr><Table.Th>Name</Table.Th><Table.Th>Status</Table.Th><Table.Th>Generation</Table.Th><Table.Th>Created</Table.Th><Table.Th /></Table.Tr></Table.Thead><Table.Tbody>{items.map((item) => <Table.Tr key={item.metadata.name} onClick={() => navigate(`resources/${resource.slug}/${encodeURIComponent(item.metadata.name)}`)} className="clickable-row"><Table.Td><Text fw={700}>{item.metadata.name}</Text><Text size="xs" c="dimmed">{Object.entries(item.metadata.labels || {}).slice(0, 2).map(([key, value]) => `${key}=${value}`).join(' · ')}</Text></Table.Td><Table.Td><StatusBadge status={resourceStatus(item)} /></Table.Td><Table.Td>{item.metadata.generation ?? '—'}</Table.Td><Table.Td>{item.metadata.creationTimestamp ? new Date(item.metadata.creationTimestamp).toLocaleString() : '—'}</Table.Td><Table.Td><Group justify="flex-end" wrap="nowrap">{provisioningAction(item)}<ChevronRight size={17} /></Group></Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer>}
   </>
 }
@@ -344,6 +315,7 @@ function ResourceEditor({ resource, resources, spec, name }) {
   useEffect(() => { if (mode === 'form') setRaw(JSON.stringify(manifest, null, 2)) }, [manifest, mode])
   const switchMode = (next) => { if (next === 'form' && mode === 'json') { try { const parsed = JSON.parse(raw); setData({ name: parsed.metadata?.name || '', labels: parsed.metadata?.labels || {}, annotations: parsed.metadata?.annotations || {}, spec: parsed.spec || {} }); setError('') } catch (caught) { setError(`Manifest JSON is invalid: ${caught.message}`); return } }; if (next === 'json') setRaw(JSON.stringify(manifest, null, 2)); setMode(next) }
   const save = async () => { setError(''); setSaving(true); let payload = manifest; if (mode === 'json') { try { payload = JSON.parse(raw) } catch (caught) { setError(`Manifest JSON is invalid: ${caught.message}`); setSaving(false); return } }; if (!payload.metadata?.name || !/^[a-z0-9](?:[-a-z0-9.]{0,251}[a-z0-9])?$/.test(payload.metadata.name)) { setError('Name must be a valid lowercase DNS-style name.'); setSaving(false); return }; const validation = validator.validateFormData(payload.spec || {}, baseSchema); if (validation.errors.length) { setError(validation.errors[0].stack); setMode('form'); setSaving(false); return }; try { const headers = { 'Content-Type': 'application/json', ...(editing && etag ? { 'If-Match': etag } : {}) }; const { body } = await apiFetch(editing ? `${resource.path}/${encodeURIComponent(name)}` : resource.path, { method: editing ? 'PUT' : 'POST', headers, body: JSON.stringify(payload) }); showNotice(`${body.metadata.name} ${editing ? 'updated' : 'created'}`); navigate(`resources/${resource.slug}/${encodeURIComponent(body.metadata.name)}`) } catch (caught) { setError(caught.status === 409 ? 'This resource changed while you were editing it. Reload and try again.' : caught.message) } finally { setSaving(false) } }
+  if (editing && !resource.canEdit) return <Alert color="orange">{resource.kind} requests cannot be edited. Create a new request for another execution.</Alert>
   if (loading) return <Loading />
   const actions = <><Button variant="default" onClick={() => navigate(editing ? `resources/${resource.slug}/${encodeURIComponent(name)}` : `resources/${resource.slug}`)}>Cancel</Button><Button leftSection={saving ? <Loader size={14} color="white" /> : <Check size={15} />} disabled={saving} onClick={save}>{editing ? 'Save changes' : 'Create resource'}</Button></>
   return <><PageTitle overline={resource.label} title={editing ? `Edit ${name}` : `Create ${humanize(resource.kind)}`} description="Edit desired state with guided fields or the complete JSON manifest." back={() => navigate(editing ? `resources/${resource.slug}/${encodeURIComponent(name)}` : `resources/${resource.slug}`)} actions={actions} />{error && <Alert color="red" mb="md">{error}</Alert>}<SegmentedControl value={mode} onChange={switchMode} data={[{ value: 'form', label: 'Guided form' }, { value: 'json', label: 'Manifest JSON' }]} mb="md" />{mode === 'json' ? <Paper withBorder radius="md" p="lg"><JsonInput label="Resource manifest" value={raw} onChange={setRaw} validationError="Invalid JSON" formatOnBlur autosize minRows={20} styles={{ input: { fontFamily: 'ui-monospace, monospace', fontSize: 13 } }} /></Paper> : <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md" className="editor-grid"><Paper withBorder radius="md" p="xl" className="identity-panel"><Title order={2} size="h4">Identity</Title><Text size="sm" c="dimmed" mb="lg">Stable name and optional organization metadata.</Text><TextInput label="Name" required disabled={editing} value={data.name} onChange={(event) => setData({ ...data, name: event.currentTarget.value })} description="Lowercase DNS-style name" /><KeyValues label="Labels" value={data.labels} onChange={(labels) => setData({ ...data, labels })} /><KeyValues label="Annotations" value={data.annotations} onChange={(annotations) => setData({ ...data, annotations })} /></Paper><Paper withBorder radius="md" p={{ base: 'md', sm: 'xl' }}>{catalogLoading && <Group gap="xs" mb="md"><Loader size="xs" /><Text size="xs" c="dimmed">Loading resource choices…</Text></Group>}<Form schema={schema} formData={data.spec} validator={validator} uiSchema={schemaUi(schema, resource.kind)} formContext={{ resources, catalog, catalogLoading }} showErrorList={false} onChange={({ formData }) => setData({ ...data, spec: formData })}><></></Form></Paper></SimpleGrid>}</>
@@ -351,14 +323,14 @@ function ResourceEditor({ resource, resources, spec, name }) {
 
 function JsonView({ value }) { return <Paper withBorder radius="md" style={{ overflow: 'hidden' }}><Group justify="space-between" px="md" py="xs" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}><Text size="xs" fw={750} c="dimmed">JSON</Text><Button variant="subtle" size="compact-xs" onClick={() => navigator.clipboard.writeText(JSON.stringify(value, null, 2))}>Copy</Button></Group><ScrollArea><Code block p="lg" bg="transparent" style={{ minHeight: 280 }}>{JSON.stringify(value, null, 2)}</Code></ScrollArea></Paper> }
 
-function ResourceDetail({ resource, name }) {
+function ResourceDetail({ resource, resources, name }) {
   const [state, setState] = useState({ loading: true, item: null, etag: '', error: '' }); const [tab, setTab] = useState('overview'); const [confirm, { open: openConfirm, close: closeConfirm }] = useDisclosure(false); const [deleting, setDeleting] = useState(false)
   const load = useCallback(async () => { setState((value) => ({ ...value, loading: true })); try { const { body, response } = await apiFetch(`${resource.path}/${encodeURIComponent(name)}`); setState({ loading: false, item: body, etag: response.headers.get('etag') || `"${body.metadata.resourceVersion}"`, error: '' }) } catch (caught) { setState({ loading: false, item: null, etag: '', error: caught.message }) } }, [name, resource.path])
   useEffect(() => { load() }, [load])
   const remove = async () => { setDeleting(true); try { await apiFetch(`${resource.path}/${encodeURIComponent(name)}`, { method: 'DELETE', headers: { 'If-Match': state.etag } }); showNotice(`${name} deletion requested`); navigate(`resources/${resource.slug}`) } catch (caught) { showNotice(caught.message, 'error'); setDeleting(false); closeConfirm() } }
   if (state.loading) return <Loading />; if (state.error) return <ErrorView message={state.error} retry={load} />
-  const item = state.item; const actions = <><Button variant="default" leftSection={<RefreshCw size={15} />} onClick={load}>Refresh</Button>{resource.kind === 'Server' && <ServerRebootButton item={item} resourcePath={resource.path} apiFetch={apiFetch} onRequested={({ body }) => showNotice(`${body.metadata.name} queued`)} />}{resource.kind === 'Server' && <ServerProvisionButton item={item} resourcePath={resource.path} apiFetch={apiFetch} onRequested={({ body }) => { showNotice(`${body.metadata.name} queued`); load() }} />}<Button onClick={() => navigate(`resources/${resource.slug}/${encodeURIComponent(name)}/edit`)}>Edit</Button><Button color="red" variant="subtle" leftSection={<Trash2 size={15} />} onClick={openConfirm}>Delete</Button></>
-  return <><PageTitle overline={resource.label} title={name} description={`${resource.kind} · generation ${item.metadata.generation ?? '—'}`} back={() => navigate(`resources/${resource.slug}`)} actions={actions} />{resource.kind === 'Server' && <Group mb="md"><Text size="sm">homelabd</Text><ServerAgentPulse item={item} resourcePath={resource.path} apiFetch={apiFetch} /></Group>}<SimpleGrid cols={{ base: 2, lg: 4 }} mb="lg">{[['Status', <StatusBadge status={resourceStatus(item)} />], ['Resource version', item.metadata.resourceVersion], ['Created', item.metadata.creationTimestamp ? new Date(item.metadata.creationTimestamp).toLocaleString() : '—'], ['UID', item.metadata.uid || '—']].map(([label, value]) => <Paper withBorder p="md" radius="md" key={label}><Text size="xs" c="dimmed">{label}</Text><Box mt={6} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</Box></Paper>)}</SimpleGrid>{resource.kind === 'Server' && <ServerProvisionProgress item={item} resourcePath={resource.path} apiFetch={apiFetch} onUpdate={({ body, response }) => setState(value => value.item && acceptProvisioningUpdate(value.item, body) ? { ...value, item: body, etag: response.headers.get('etag') || `"${body.metadata.resourceVersion}"` } : value)} />}<Tabs value={tab} onChange={setTab}><Tabs.List mb="md"><Tabs.Tab value="overview">Overview</Tabs.Tab><Tabs.Tab value="spec">Desired state</Tabs.Tab><Tabs.Tab value="status">Observed status</Tabs.Tab><Tabs.Tab value="raw">Raw</Tabs.Tab></Tabs.List><Tabs.Panel value="overview"><SimpleGrid cols={{ base: 1, md: 2 }}><Paper withBorder p="xl" radius="md"><Title order={2} size="h4" mb="md">Metadata</Title>{[['Name', item.metadata.name], ['Kind', item.kind], ['API version', item.apiVersion], ['Generation', item.metadata.generation]].map(([key, value]) => <Group justify="space-between" py="xs" key={key} style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}><Text size="sm" c="dimmed">{key}</Text><Text size="sm" fw={600}>{value}</Text></Group>)}</Paper><Paper withBorder p="xl" radius="md"><Title order={2} size="h4" mb="md">Labels & annotations</Title><Group gap="xs">{[...Object.entries(item.metadata.labels || {}), ...Object.entries(item.metadata.annotations || {})].map(([key, value]) => <Badge key={`${key}-${value}`} variant="default" tt="none">{key}={value}</Badge>)}{!Object.keys(item.metadata.labels || {}).length && !Object.keys(item.metadata.annotations || {}).length && <Text c="dimmed">No metadata tags</Text>}</Group></Paper></SimpleGrid></Tabs.Panel><Tabs.Panel value="spec"><JsonView value={item.spec} /></Tabs.Panel><Tabs.Panel value="status"><JsonView value={item.status || { message: 'No observed status yet.' }} /></Tabs.Panel><Tabs.Panel value="raw"><JsonView value={item} /></Tabs.Panel></Tabs><Modal opened={confirm} onClose={closeConfirm} title={<Text fw={700}>Delete {name}?</Text>} centered><Text c="dimmed" size="sm">This can trigger controller cleanup and cannot be undone.</Text><Group justify="flex-end" mt="xl"><Button variant="default" onClick={closeConfirm}>Cancel</Button><Button color="red" loading={deleting} onClick={remove}>Delete</Button></Group></Modal></>
+  const item = state.item; const actions = <><Button variant="default" leftSection={<RefreshCw size={15} />} onClick={load}>Refresh</Button>{resource.kind === 'Server' && <ServerRebootButton item={item} resourcePath={resource.path} apiFetch={apiFetch} onRequested={({ body }) => showNotice(`${body.metadata.name} queued`)} />}{resource.kind === 'Server' && <ServerProvisionButton item={item} resourcePath={resource.path} apiFetch={apiFetch} onRequested={({ body }) => { showNotice(`${body.metadata.name} queued`); load() }} />}{resource.canEdit && <Button onClick={() => navigate(`resources/${resource.slug}/${encodeURIComponent(name)}/edit`)}>Edit</Button>}{resource.canDelete && <Button color="red" variant="subtle" leftSection={<Trash2 size={15} />} onClick={openConfirm}>Delete</Button>}</>
+  return <><PageTitle overline={resource.label} title={name} description={`${resource.kind} · generation ${item.metadata.generation ?? '—'}`} back={() => navigate(`resources/${resource.slug}`)} actions={actions} />{resource.kind === 'Server' && <Group mb="md"><Text size="sm">homelabd</Text><ServerAgentPulse item={item} resourcePath={resource.path} apiFetch={apiFetch} /></Group>}<SimpleGrid cols={{ base: 2, lg: 4 }} mb="lg">{[['Status', <StatusBadge status={resourceStatus(item)} />], ['Resource version', item.metadata.resourceVersion], ['Created', item.metadata.creationTimestamp ? new Date(item.metadata.creationTimestamp).toLocaleString() : '—'], ['UID', item.metadata.uid || '—']].map(([label, value]) => <Paper withBorder p="md" radius="md" key={label}><Text size="xs" c="dimmed">{label}</Text><Box mt={6} style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</Box></Paper>)}</SimpleGrid>{resource.kind === 'Server' && <ServerProvisionProgress item={item} resourcePath={resource.path} apiFetch={apiFetch} onUpdate={({ body, response }) => setState(value => value.item && acceptProvisioningUpdate(value.item, body) ? { ...value, item: body, etag: response.headers.get('etag') || `"${body.metadata.resourceVersion}"` } : value)} />}<ResourceInsights item={item} resources={resources} apiFetch={apiFetch} />{resource.kind === 'Server' && <ServerStoragePanel item={item} resources={resources} apiFetch={apiFetch} />}<Tabs value={tab} onChange={setTab}><Tabs.List mb="md"><Tabs.Tab value="overview">Overview</Tabs.Tab><Tabs.Tab value="spec">Desired state</Tabs.Tab><Tabs.Tab value="status">Observed status</Tabs.Tab><Tabs.Tab value="raw">Raw</Tabs.Tab></Tabs.List><Tabs.Panel value="overview"><SimpleGrid cols={{ base: 1, md: 2 }}><Paper withBorder p="xl" radius="md"><Title order={2} size="h4" mb="md">Metadata</Title>{[['Name', item.metadata.name], ['Kind', item.kind], ['API version', item.apiVersion], ['Generation', item.metadata.generation]].map(([key, value]) => <Group justify="space-between" py="xs" key={key} style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}><Text size="sm" c="dimmed">{key}</Text><Text size="sm" fw={600}>{value}</Text></Group>)}</Paper><Paper withBorder p="xl" radius="md"><Title order={2} size="h4" mb="md">Labels & annotations</Title><Group gap="xs">{[...Object.entries(item.metadata.labels || {}), ...Object.entries(item.metadata.annotations || {})].map(([key, value]) => <Badge key={`${key}-${value}`} variant="default" tt="none">{key}={value}</Badge>)}{!Object.keys(item.metadata.labels || {}).length && !Object.keys(item.metadata.annotations || {}).length && <Text c="dimmed">No metadata tags</Text>}</Group></Paper></SimpleGrid></Tabs.Panel><Tabs.Panel value="spec"><JsonView value={item.spec} /></Tabs.Panel><Tabs.Panel value="status"><JsonView value={item.status || { message: 'No observed status yet.' }} /></Tabs.Panel><Tabs.Panel value="raw"><JsonView value={item} /></Tabs.Panel></Tabs><Modal opened={confirm} onClose={closeConfirm} title={<Text fw={700}>Delete {name}?</Text>} centered><Text c="dimmed" size="sm">This can trigger controller cleanup and cannot be undone.</Text><Group justify="flex-end" mt="xl"><Button variant="default" onClick={closeConfirm}>Cancel</Button><Button color="red" loading={deleting} onClick={remove}>Delete</Button></Group></Modal></>
 }
 
 function ApiExplorer({ spec }) {
@@ -380,7 +352,7 @@ export default function AppMantine() {
   let content
   if (specError && !resources.length) content = <Stack align="center" ta="center" py={80}><ThemeIcon size={64} radius="xl" variant="light"><Settings2 /></ThemeIcon><Title order={1}>Connect the Stigmergy API</Title><Text c="dimmed">The console is running, but its API proxy cannot reach Stigmergy.</Text><Alert color="red">{specError}</Alert><Button leftSection={<RefreshCw size={15} />} onClick={check}>Try again</Button></Stack>
   else if (route[0] === 'explorer') content = <ApiExplorer spec={spec} />
-  else if (route[0] === 'resources' && resource) content = route[2] === 'new' ? <ResourceEditor resource={resource} resources={resources} spec={spec} /> : route[2] && route[3] === 'edit' ? <ResourceEditor resource={resource} resources={resources} spec={spec} name={decodeURIComponent(route[2])} /> : route[2] ? <ResourceDetail resource={resource} name={decodeURIComponent(route[2])} /> : <ResourceList resource={resource} />
+  else if (route[0] === 'resources' && resource) content = route[2] === 'new' ? <ResourceEditor resource={resource} resources={resources} spec={spec} /> : route[2] && route[3] === 'edit' ? <ResourceEditor resource={resource} resources={resources} spec={spec} name={decodeURIComponent(route[2])} /> : route[2] ? <ResourceDetail key={`${resource.kind}/${route[2]}`} resource={resource} resources={resources} name={decodeURIComponent(route[2])} /> : <ResourceList key={resource.kind} resource={resource} />
   else content = <Dashboard resources={resources} readiness={readiness} />
   return <Layout key={tokenRevision} resources={resources} route={route} readiness={readiness} opened={opened} toggle={toggle} close={close}><Group align="end" mb="lg"><PasswordInput label="API bearer token" description="Kept only for this browser session" value={token} onChange={(event) => setToken(event.currentTarget.value)} style={{ flex: 1 }} /><Button variant="default" onClick={() => { sessionApiToken = token.trim(); setTokenRevision((value) => value + 1) }}>Connect</Button></Group>{content}</Layout>
 }

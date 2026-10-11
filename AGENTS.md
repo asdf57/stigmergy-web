@@ -4,6 +4,12 @@
   `src/AppMantine.jsx`. Reuse `apiFetch`/`authorizedFetch` for same-origin bearer
   auth and error handling; do not add a separate auth scheme or leak tokens to
   external links.
+- `src/resourceCatalog.js` groups discovered kinds and provides reference targets.
+  Keep the fallback group so new API resources remain visible. Derive Edit/Delete
+  availability from OpenAPI item operations; immutable requests have no Edit.
+- Inspection panels use `resourceInsights.js` for read-only, UID-checked related
+  reads. Do not infer execution targets from scripts or guess missing CI build
+  identities. Trust digests and certificate dates are observations, not live proof.
 - Server provisioning uses `ServerProvisionButton.jsx` and tested helpers in
   `serverProvisioning.js`. Fetch UID-bound Machine storage, select one system disk
   and POST an immutable ProvisioningRun; never PATCH disk/counters into Server.
