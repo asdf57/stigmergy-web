@@ -29,7 +29,8 @@ export function provisionDisks(machine) {
   const disks = machine.status?.inventory?.storage || []
   return disks.map(disk => {
     const id = diskDeviceID(disk)
-    const eligible = disk.type === 'disk' && ['sata', 'ata', 'nvme'].includes(disk.tran) && id && disks.filter(other => diskDeviceID(other) === id).length === 1
+    const hardwareArea = ['kname', 'name', 'path'].some(field => /^mmcblk[0-9]+(?:boot[0-9]+|rpmb|gp[0-9]+)$/.test((disk[field] || '').split('/').pop()))
+    const eligible = disk.type === 'disk' && !hardwareArea && !disk.removable && !disk.readOnly && ['sata', 'ata', 'nvme', 'mmc'].includes(disk.tran) && id && disks.filter(other => diskDeviceID(other) === id).length === 1
     return { ...disk, deviceID: id, eligible: Boolean(eligible) }
   })
 }
@@ -43,13 +44,30 @@ export function provisioningTargets(isos) {
       isoRef: { name: iso.metadata.name, uid: iso.metadata.uid } }))
 }
 
-export async function requestServerProvision(apiFetch, resourcePath, server, machine, deviceID, confirmation, runName, selection) {
+export function provisionPartitions(server, machine, resources, deviceID) {
+  const disk = provisionDisks(machine).find(candidate => candidate.eligible && candidate.deviceID === deviceID)
+  if (!disk) return []
+  return resources.filter(partition => {
+    const spec = partition.spec || {}
+    const selector = spec.diskSelector || {}
+    return !partition.metadata.deletionTimestamp && spec.serverRef?.name === server.metadata.name
+      && (!spec.serverRef.uid || spec.serverRef.uid === server.metadata.uid)
+      && (selector.serial || selector.wwn)
+      && (!selector.serial || selector.serial === disk.serial)
+      && (!selector.wwn || selector.wwn.toLowerCase() === disk.wwn?.toLowerCase())
+  }).sort((left, right) => left.spec.number - right.spec.number)
+}
+
+export async function requestServerProvision(apiFetch, resourcePath, server, machine, deviceID, confirmation, runName, selection, partitionResources = []) {
   const blocked = provisionBlockReason(server, { selectOperatingSystem: Boolean(selection) })
   if (blocked) throw new Error(blocked)
   if (confirmation !== server.metadata.name) throw new Error('Type the exact Server name to confirm disk replacement.')
   const reference = server.status.machineRef
   if (machine.metadata.name !== reference.name || machine.metadata.uid !== reference.uid || machine.metadata.deletionTimestamp) throw new Error('The bound Machine changed. Refresh and select the disk again.')
-  if (!provisionDisks(machine).some(disk => disk.eligible && disk.deviceID === deviceID)) throw new Error('Select one uniquely identified SATA/NVMe system disk.')
+  if (!provisionDisks(machine).some(disk => disk.eligible && disk.deviceID === deviceID)) throw new Error('Select one uniquely identified SATA/NVMe/MMC system disk.')
+  const partitions = provisionPartitions(server, machine, partitionResources, deviceID)
+  if (partitions.filter(partition => partition.spec.role === 'root').length !== 1 || partitions.filter(partition => partition.spec.role === 'efi').length !== 1) throw new Error('Configure and review one root and one EFI DiskPartition for this disk before provisioning.')
+  const partitionRefs = partitions.map(partition => ({ name: partition.metadata.name, uid: partition.metadata.uid, generation: partition.metadata.generation }))
   if (selection) {
     const serverUID = server.metadata.uid
     const { target, targets } = selection
@@ -75,7 +93,7 @@ export async function requestServerProvision(apiFetch, resourcePath, server, mac
       body: JSON.stringify({ apiVersion: 'homelab.io/v1alpha1', kind: 'ProvisioningRun', metadata: { name }, spec: {
         serverRef: { name: server.metadata.name, uid: server.metadata.uid },
         serverGeneration: server.metadata.generation,
-        machineRef: reference, storage: { disks: [{ deviceID, role: 'system' }] },
+        machineRef: reference, storage: { disks: [{ deviceID, role: 'system' }], partitionRefs },
       } }),
     })
   } catch (error) {

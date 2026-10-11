@@ -1,6 +1,28 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { diskDeviceID, provisionBlockReason, provisionDisks, provisioningTargets, requestServerProvision } from './serverProvisioning.js'
+import { diskDeviceID, provisionBlockReason, provisionDisks, provisionPartitions, provisioningTargets, requestServerProvision as sendProvisionRequest } from './serverProvisioning.js'
+
+const partitions = () => ['efi', 'root'].map((role, index) => ({
+  metadata: { name: `beelink-${role}`, uid: `${role}-uid`, generation: 1 },
+  spec: { serverRef: { name: 'beelink', uid: 'server-uid' }, diskSelector: { serial: 'serial' },
+    number: index + 1, role, filesystem: role === 'efi' ? 'vfat' : 'ext4',
+    mountPoint: role === 'efi' ? '/boot/efi' : '/', capacity: role === 'efi' ? { storage: '512Mi' } : { useRemaining: true } },
+}))
+
+// Existing lifecycle tests use one explicit reviewed fixture layout.
+const requestServerProvision = (apiFetch, path, server, machine, disk, confirmation, name, selection) =>
+  sendProvisionRequest(apiFetch, path, server, machine, disk, confirmation, name, selection, partitions())
+
+test('partition resolution is bound to the Server and selected disk', () => {
+  const other = partitions().map(partition => ({ ...partition, spec: { ...partition.spec, serverRef: { name: 'other' } } }))
+  const replaced = partitions().map(partition => ({ ...partition, spec: { ...partition.spec, serverRef: { name: 'beelink', uid: 'replacement' } } }))
+  assert.equal(provisionPartitions(server(), machine(), [...partitions(), ...other, ...replaced], 'wwn:0x123').length, 2)
+  assert.equal(provisionPartitions(server(), machine(), partitions(), 'serial:usb').length, 0)
+})
+
+test('missing layout cannot save OS or create a provisioning request', async () => {
+  await assert.rejects(sendProvisionRequest(() => assert.fail('must not write'), '/api/v1alpha1/servers', server(), machine(), 'wwn:0x123', 'beelink', 'run', selection(), []), /DiskPartition/)
+})
 
 const server = () => ({ metadata: { name: 'beelink', uid: 'server-uid', generation: 1 }, spec: {
   provisioning: { enabled: true }, operatingSystem: { architecture: 'amd64', bootMode: 'uefi', distribution: 'arch', version: 'rolling' },
@@ -17,7 +39,7 @@ test('disk selection creates one immutable run, not a Server spec PATCH', async 
   assert.equal(calls.length, 1); assert.equal(calls[0][0], '/api/v1alpha1/provisioning-runs')
   assert.equal(calls[0][1].method, 'POST')
   const request = JSON.parse(calls[0][1].body)
-  assert.deepEqual(request.spec, { serverRef: { name: 'beelink', uid: 'server-uid' }, serverGeneration: 1, machineRef: { name: 'machine', uid: 'machine-uid' }, storage: { disks: [{ deviceID: 'wwn:0x123', role: 'system' }] } })
+  assert.deepEqual(request.spec, { serverRef: { name: 'beelink', uid: 'server-uid' }, serverGeneration: 1, machineRef: { name: 'machine', uid: 'machine-uid' }, storage: { disks: [{ deviceID: 'wwn:0x123', role: 'system' }], partitionRefs: partitions().map(partition => ({ ...partition.metadata })) } })
   assert.deepEqual(item.spec.provisioning, { enabled: true })
 })
 
@@ -33,6 +55,25 @@ test('missing identities, USB and ambiguous disks are unavailable', () => {
   assert.equal(diskDeviceID({ wwn: '0xABC' }), 'wwn:0xabc')
   assert.equal(diskDeviceID({ serial: 'ABC' }), 'serial:ABC')
   assert.equal(diskDeviceID({}), '')
+})
+
+test('MMC main disks are selectable, but writable hardware areas are not', () => {
+  const value = machine()
+  const disk = { type: 'disk', path: '/dev/mmcblk12', serial: '0x7722479b', tran: 'mmc', size: 31268536320 }
+  value.status.inventory.storage = [disk]
+  assert.equal(provisionDisks(value)[0].eligible, true)
+  for (const field of ['path', 'kname', 'name']) {
+    for (const name of ['mmcblk0boot0', 'mmcblk12boot1', 'mmcblk5rpmb', 'mmcblk8gp0']) {
+      value.status.inventory.storage = [{ ...disk, [field]: field === 'path' ? `/dev/${name}` : name }]
+      assert.equal(provisionDisks(value)[0].eligible, false)
+    }
+  }
+  for (const unsafe of [{ readOnly: true }, { removable: true }, { serial: '' }]) {
+    value.status.inventory.storage = [{ ...disk, ...unsafe }]
+    assert.equal(provisionDisks(value)[0].eligible, false)
+  }
+  value.status.inventory.storage = [disk, { ...disk }]
+  assert.ok(provisionDisks(value).every(candidate => !candidate.eligible))
 })
 
 test('reserved, disabled, paused and undiscovered Servers cannot request', () => {
