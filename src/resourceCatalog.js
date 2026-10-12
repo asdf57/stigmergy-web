@@ -1,12 +1,13 @@
 // OpenAPI is authoritative for available resources and supported operations.
 export const resourceGroups = [
-  { label: 'Infrastructure', kinds: ['Machine', 'MachineReport', 'Server', 'Router', 'DNSRecord', 'DiskPartition'] },
-  { label: 'Automation', kinds: ['ISO', 'Pipeline', 'PipelineProvider', 'CommandsPipeline', 'Command', 'ProvisioningRun'] },
+  { label: 'Infrastructure', kinds: ['Machine', 'MachineReport', 'Server', 'Router', 'DNSRecord', 'DiskPartition', 'KubeCluster'] },
+  { label: 'Automation', kinds: ['ISO', 'Pipeline', 'PipelineProvider', 'CommandsPipeline', 'Command', 'ProvisioningRun', 'Configuration'] },
   { label: 'Inventory', kinds: ['InventoryCaptureGroup', 'InventoryPublication', 'GitRepository'] },
   { label: 'Security', kinds: ['SecretStore', 'Secret', 'SSHKeyPair', 'SSHCertificateAuthority', 'SSHCertificate', 'UsernamePasswordCredential'] },
 ]
 
 export const referenceKinds = {
+  dependsOn: 'Configuration',
   authorizedKeyRefs: 'SSHKeyPair',
   commandsRepositoryRef: 'GitRepository',
   commandsPipelineRef: 'CommandsPipeline',

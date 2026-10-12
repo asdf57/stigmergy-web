@@ -25,7 +25,7 @@ test('every current API resource appears in navigation exactly once', () => {
     'InventoryCaptureGroup', 'InventoryPublication', 'ISO', 'Machine', 'MachineReport',
     'Pipeline', 'PipelineProvider', 'ProvisioningRun', 'Router', 'Secret', 'SecretStore',
     'Server', 'SSHCertificateAuthority', 'SSHCertificate', 'SSHKeyPair',
-    'UsernamePasswordCredential', 'FutureResource',
+    'UsernamePasswordCredential', 'KubeCluster', 'Configuration', 'FutureResource',
   ]
   const resources = discoverResources(apiFixture(kinds))
   const groups = groupResources(resources)

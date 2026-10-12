@@ -10,7 +10,7 @@ const statusReferenceKinds = {
 /** Extract named relationships, never arbitrary Secret data or execution inputs. */
 export function resourceReferences(item) {
   const references = []
-  const excluded = new Set(['data', 'inputs', 'definition', 'script', 'publishedInputContent'])
+  const excluded = new Set(['data', 'inputs', 'values', 'definition', 'script', 'publishedInputContent'])
   function walk(value, path = '') {
     if (!value || typeof value !== 'object') return
     for (const [field, child] of Object.entries(value)) {
@@ -75,7 +75,7 @@ export function trustHealth(item) {
 
 export function statusDetails(item) {
   const status = item.status || {}
-  const fields = ['currentStage', 'reason', 'message', 'startedAt', 'completedAt', 'sourceBootID', 'liveBootID', 'backendRunID']
+  const fields = ['currentStage', 'reason', 'message', 'startedAt', 'completedAt', 'sourceBootID', 'liveBootID', 'backendRunID', 'lastVerifiedAt', 'inputRevision']
   const details = fields.filter(field => status[field]).map(field => ({ label: humanize(field), value: String(status[field]) }))
   if (status.hostSSH?.message) details.push({ label: 'Host SSH', value: status.hostSSH.message })
   return details
