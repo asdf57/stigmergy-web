@@ -10,6 +10,10 @@
 - Inspection panels use `resourceInsights.js` for read-only, UID-checked related
   reads. Do not infer execution targets from scripts or guess missing CI build
   identities. Trust digests and certificate dates are observations, not live proof.
+- KubeCluster overview reads typed cluster status plus generic Server/Configuration
+  GETs. Node readiness is timestamped, not inferred from agent/SSH or label state.
+  Preserve snapshot provenance and reject replaced UIDs; never fetch kubeconfig
+  or contact Kubernetes from the browser.
 - Server provisioning uses `ServerProvisionButton.jsx` and tested helpers in
   `serverProvisioning.js`. Fetch UID-bound Machine storage, select one system disk
   and POST an immutable ProvisioningRun; never PATCH disk/counters into Server.
