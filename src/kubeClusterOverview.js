@@ -1,5 +1,25 @@
 const clusterLabel = 'homelab.io/kube-cluster'
 const roleLabel = 'homelab.io/kube-role'
+const observationMaxAge = 15 * 60 * 1000
+
+/** Current membership is independent of the last fully verified setup snapshot. */
+function membershipObservation(cluster, configurations, now) {
+  const observation = cluster.status?.observation
+  const timestamp = Date.parse(observation?.observedAt)
+  const fields = ['missingMembers', 'notReadyMembers', 'unexpectedNodes', 'identityConflicts']
+  if (!observation || !Number.isFinite(timestamp) || timestamp > now + 5000
+      || typeof observation.membership?.ready !== 'boolean'
+      || !fields.every(field => Array.isArray(observation.membership[field])
+        && observation.membership[field].every(value => typeof value === 'string' && value))) return null
+  const configuration = configurations.find(value => value.metadata.uid === observation.configurationRef?.uid
+    && value.metadata.name === observation.configurationRef?.name)
+  const fresh = now - timestamp <= observationMaxAge
+    && observation.observedGeneration === cluster.metadata.generation
+    && configuration?.metadata.generation === observation.configurationGeneration
+    && configuration?.status?.inputRevision === observation.inputRevision
+    && configuration?.status?.playbookRevision === observation.playbookRevision
+  return { ...observation, timestamp, fresh, configuration }
+}
 
 /** Cluster selection is independent of inventory capture membership. */
 export function clusterMembers(cluster, servers) {
@@ -54,6 +74,12 @@ export function clusterOverview(cluster, servers, configurations, now = Date.now
     && configuration.spec?.targetRef?.kind === 'KubeCluster'
     && configuration.spec.targetRef.name === cluster.metadata.name)
   const verification = recordedVerification(cluster, setups, now)
+  const observation = membershipObservation(cluster, setups, now)
+  if (observation?.fresh && !members.every(member =>
+    observation.configuration.status?.resolvedReferences?.some(reference =>
+      reference.kind === 'Server' && reference.name === member.server.metadata.name
+      && reference.uid === member.server.metadata.uid
+      && reference.generation === member.server.metadata.generation))) observation.fresh = false
   const issues = []
   const controlPlanes = members.filter(member => member.role === 'control-plane')
   if (controlPlanes.length !== 1) issues.push(`V1 requires one control plane; ${controlPlanes.length} are selected.`)
@@ -70,6 +96,9 @@ export function clusterOverview(cluster, servers, configurations, now = Date.now
     && observed.network?.provider === cluster.spec.network?.provider
     && observed.network?.version === cluster.spec.network?.version
   const current = Boolean(verification && configuration && matches && settingsMatch && issues.length === 0
+    && now - verification.timestamp <= observationMaxAge
+    && configuration.status?.phase !== 'Failed'
+    && (!observation || (observation.fresh && observation.membership.ready))
     && observed.configurationGeneration === configuration.metadata.generation
     && observed.inputRevision === configuration.status?.inputRevision
     && observed.playbookRevision === configuration.status?.playbookRevision
@@ -78,7 +107,7 @@ export function clusterOverview(cluster, servers, configurations, now = Date.now
       && reference.name === member.server.metadata.name && reference.generation === member.server.metadata.generation)))
   const unmatchedNodes = observed?.nodes.filter(node => !members.some(member =>
     member.server.metadata.uid === node.serverRef.uid && member.nodeName === node.nodeName && member.role === node.role)) || []
-  return { members, setups, verification, current, issues, unmatchedNodes,
+  return { members, setups, verification, observation, current, issues, unmatchedNodes,
     settingsMatch: Boolean(settingsMatch), membershipMatches: matches,
     controlPlanes, workers: members.filter(member => member.role === 'worker') }
 }

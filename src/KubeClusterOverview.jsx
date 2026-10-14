@@ -17,7 +17,7 @@ function Setting({ label, value }) {
   </div>
 }
 
-function MemberRow({ member, verification, resources, now }) {
+function MemberRow({ member, verification, observation, resources, now }) {
   const { server, nodeName, role, bindingConflict } = member
   const pulse = agentPulse(server, now)
   const observed = verification?.observations.nodes.find(node => node.serverRef.uid === server.metadata.uid
@@ -42,6 +42,13 @@ function MemberRow({ member, verification, resources, now }) {
       {server.status?.hostSSH?.phase || 'Not reported'}
     </Badge></Table.Td>
     <Table.Td>
+      {observation && <Badge color={observation.fresh && observation.membership.missingMembers.includes(nodeName) ? 'red' : 'gray'} variant="light" mb={4}>
+        {!observation.fresh ? 'Membership observation is stale'
+          : observation.membership.missingMembers.includes(nodeName) ? 'Missing from Kubernetes'
+            : observation.membership.identityConflicts.includes(nodeName) ? 'Identity / labels differ'
+              : observation.membership.notReadyMembers.includes(nodeName) ? 'Node not Ready'
+                : 'Present and Ready at observation'}
+      </Badge>}
       <Text size="sm" c={bindingConflict ? 'red' : 'dimmed'}>
         {bindingConflict ? 'Cluster UID conflict' : observed ? `Node ${observed.ready ? 'Ready' : 'Not Ready'} at verification` : 'Not verified in latest report'}
       </Text>
@@ -139,6 +146,14 @@ export default function KubeClusterOverview({ item, resources, apiFetch }) {
         {verification && <Setting label="Verified network checks" value={`Service DNS: ${verification.observations.checks?.serviceDNS === true ? 'Passed' : 'Not verified'} · Pod connectivity: ${verification.observations.checks?.podConnectivity === true ? 'Passed' : 'Not verified'}`} />}
       </SimpleGrid>
       {overview.issues.map(issue => <Alert key={issue} color="orange">{issue}</Alert>)}
+      {overview.observation && <Alert color={overview.observation.fresh && overview.observation.membership.ready ? 'teal' : 'orange'}>
+        Membership observed {time(overview.observation.observedAt)}{!overview.observation.fresh && ' (stale or inputs changed)'}.
+        {['missingMembers', 'notReadyMembers', 'unexpectedNodes', 'identityConflicts'].map(field =>
+          overview.observation.membership[field].length > 0 && <Text key={field} size="sm">
+            {({ missingMembers: 'Missing', notReadyMembers: 'Not Ready', unexpectedNodes: 'Unexpected', identityConflicts: 'Identity / label conflicts' })[field]}: {overview.observation.membership[field].join(', ')}
+          </Text>)}
+        <Text size="xs">Membership is observed separately from the last successful workload verification.</Text>
+      </Alert>}
       {verification && (!overview.settingsMatch || !overview.membershipMatches) && <Alert color="orange">
         Desired settings or membership differ from the last verified report. That report does not verify the new desired state.
       </Alert>}
@@ -150,7 +165,7 @@ export default function KubeClusterOverview({ item, resources, apiFetch }) {
             <Table.Thead><Table.Tr>{['Server / node', 'Desired role', 'Management address', 'homelabd', 'Managed SSH', 'Verified Node snapshot'].map(label =>
               <Table.Th key={label}>{label}</Table.Th>)}</Table.Tr></Table.Thead>
             <Table.Tbody>{overview.members.map(member => <MemberRow key={member.server.metadata.uid}
-              member={member} verification={verification} resources={resources} now={now} />)}</Table.Tbody>
+              member={member} verification={verification} observation={overview.observation} resources={resources} now={now} />)}</Table.Tbody>
           </Table>
         </Table.ScrollContainer>}
         {overview.unmatchedNodes.length > 0 && <Alert color="orange" mt="sm">

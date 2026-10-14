@@ -23,7 +23,7 @@ function fixtures() {
   return { cluster, servers, configurations }
 }
 
-const now = Date.parse('2026-10-13T01:00:00Z')
+const now = Date.parse('2026-10-13T00:05:00Z')
 function overview(fixture) {
   return clusterOverview(fixture.cluster, fixture.servers, fixture.configurations, now)
 }
@@ -57,6 +57,31 @@ test('replacement reporting Configuration cannot claim an old observation', () =
   fixture.configurations[0].metadata.uid = 'replacement'
   assert.equal(overview(fixture).verification.configuration, null)
   assert.equal(overview(fixture).current, false)
+})
+
+test('old successful snapshot cannot appear current', () => {
+  const fixture = fixtures()
+  const result = clusterOverview(fixture.cluster, fixture.servers, fixture.configurations,
+    Date.parse('2026-10-13T01:00:00Z'))
+  assert.equal(result.current, false)
+  assert.notEqual(result.verification, null)
+})
+
+test('negative current observation takes precedence over a previous success', () => {
+  const fixture = fixtures()
+  fixture.cluster.status.observation = {
+    observedAt: '2026-10-13T00:04:00Z', observedGeneration: 1,
+    configurationRef: {name: 'setup', uid: 'setup-uid'}, configurationGeneration: 1,
+    inputRevision: 'revision', playbookRevision: 'commit',
+    membership: {ready: false, missingMembers: ['zima'], notReadyMembers: [], unexpectedNodes: [], identityConflicts: []},
+  }
+  const result = overview(fixture)
+  assert.equal(result.observation.fresh, true)
+  assert.equal(result.current, false)
+  assert.deepEqual(result.observation.membership.missingMembers, ['zima'])
+  assert.equal(result.verification.observations.nodes[0].ready, true)
+  fixture.cluster.status.observation.observedAt = '2026-10-12T00:00:00Z'
+  assert.equal(overview(fixture).observation.fresh, false)
 })
 
 test('invalid, incomplete and future observations are refused', () => {
