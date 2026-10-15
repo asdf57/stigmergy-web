@@ -10,6 +10,7 @@ export function provisionBlockReason(server, { selectOperatingSystem = false } =
   const os = server.spec?.operatingSystem || {}
   if (server.metadata?.deletionTimestamp) return 'This Server is being deleted.'
   if (status.maintenance || status.activeRunRef) return 'A run owns this Server. Finish or inspect recovery before requesting another.'
+  if (server.status?.operationRef) return `Operation ${server.status.operationRef.name} owns this Server. Wait for completion or inspect the Operation.`
   if (!server.spec?.provisioning?.enabled) return 'Enable provisioning in the Server configuration first; enabling it does not erase disks.'
   if (server.spec?.reconciliation?.paused) return 'Server reconciliation is paused.'
   if (!server.status?.machineRef?.uid) return 'Waiting for a discovered Machine binding.'
@@ -58,16 +59,16 @@ export function provisionPartitions(server, machine, resources, deviceID) {
   }).sort((left, right) => left.spec.number - right.spec.number)
 }
 
-export async function requestServerProvision(apiFetch, resourcePath, server, machine, deviceID, confirmation, runName, selection, partitionResources = []) {
+export async function requestServerProvision(apiFetch, resourcePath, server, machine, deviceID, runName, selection, partitionResources = []) {
   const blocked = provisionBlockReason(server, { selectOperatingSystem: Boolean(selection) })
   if (blocked) throw new Error(blocked)
-  if (confirmation !== server.metadata.name) throw new Error('Type the exact Server name to confirm disk replacement.')
   const reference = server.status.machineRef
   if (machine.metadata.name !== reference.name || machine.metadata.uid !== reference.uid || machine.metadata.deletionTimestamp) throw new Error('The bound Machine changed. Refresh and select the disk again.')
   if (!provisionDisks(machine).some(disk => disk.eligible && disk.deviceID === deviceID)) throw new Error('Select one uniquely identified SATA/NVMe/MMC system disk.')
   const partitions = provisionPartitions(server, machine, partitionResources, deviceID)
   if (partitions.filter(partition => partition.spec.role === 'root').length !== 1 || partitions.filter(partition => partition.spec.role === 'efi').length !== 1) throw new Error('Configure and review one root and one EFI DiskPartition for this disk before provisioning.')
   const partitionRefs = partitions.map(partition => ({ name: partition.metadata.name, uid: partition.metadata.uid, generation: partition.metadata.generation }))
+  let osSaved = false
   if (selection) {
     const serverUID = server.metadata.uid
     const { target, targets } = selection
@@ -75,7 +76,9 @@ export async function requestServerProvision(apiFetch, resourcePath, server, mac
     if (!target || !targets?.some(candidate => fields.every(field => candidate[field] === target[field]) && candidate.isoRef.uid === target.isoRef?.uid && candidate.isoRef.name === target.isoRef?.name)) throw new Error('Select an OS/version with an available supported ISO.')
     if (fields.some(field => server.spec.operatingSystem?.[field] !== target[field]) || server.spec.boot?.isoRef?.name !== target.isoRef.name || server.spec.boot?.isoRef?.uid !== target.isoRef.uid) {
       const { body: fresh } = await apiFetch(`${resourcePath}/${encodeURIComponent(server.metadata.name)}`)
-      if (fresh.metadata.uid !== serverUID || fresh.metadata.generation !== server.metadata.generation || fresh.status?.machineRef?.uid !== reference.uid || fresh.status?.machineRef?.name !== reference.name || provisionBlockReason(fresh, { selectOperatingSystem: true })) throw new Error('Server desired configuration or binding changed. Refresh and review before requesting provisioning.')
+      const currentBlock = provisionBlockReason(fresh, { selectOperatingSystem: true })
+      if (currentBlock) throw new Error(currentBlock)
+      if (fresh.metadata.uid !== serverUID || fresh.metadata.generation !== server.metadata.generation || fresh.status?.machineRef?.uid !== reference.uid || fresh.status?.machineRef?.name !== reference.name) throw new Error('Server desired configuration or binding changed. Refresh and review before requesting provisioning.')
       server = fresh
       if (!server.metadata.resourceVersion) throw new Error('Refresh to obtain the current Server resource version.')
       const updated = await apiFetch(`${resourcePath}/${encodeURIComponent(server.metadata.name)}`, {
@@ -83,6 +86,7 @@ export async function requestServerProvision(apiFetch, resourcePath, server, mac
         body: JSON.stringify({ operatingSystem: Object.fromEntries(fields.map(field => [field, target[field]])), boot: { isoRef: target.isoRef } }),
       })
       server = updated.body
+      osSaved = true
       if (server.metadata.uid !== serverUID || server.status?.machineRef?.uid !== reference.uid || server.status?.machineRef?.name !== reference.name || server.spec.boot?.isoRef?.uid !== target.isoRef.uid || fields.some(field => server.spec.operatingSystem?.[field] !== target[field]) || provisionBlockReason(server, { selectOperatingSystem: true })) throw new Error('OS saved, but the Server changed. Refresh and review before requesting provisioning.')
     }
   }
@@ -97,7 +101,7 @@ export async function requestServerProvision(apiFetch, resourcePath, server, mac
       } }),
     })
   } catch (error) {
-    if (selection) error.message = `No provisioning request was confirmed; the selected OS may already be saved. Refresh and review before trying again. ${error.message}`
+    error.message = `${osSaved ? 'The selected OS/ISO was saved. ' : ''}Provisioning was not confirmed. ${error.message} Refresh and review before trying again.`
     throw error
   }
 }

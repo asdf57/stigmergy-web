@@ -45,15 +45,14 @@ test('reboot creates a UID-bound ordinary Command, never patches Server or provi
     assert.deepEqual(command.spec.commandsPipelineRef, { name: 'servers', uid: 'executor-uid' })
     assert.match(command.spec.script, /system_operations.py" reboot --server 'node' --uid 'server-uid' --machine-uid 'machine-uid'/)
     assert.doesNotMatch(command.spec.script, /ssh |systemctl|provisioning/)
-  }, '/api/v1alpha1/servers', server(), executor(), 'node', 'reboot-test')
+  }, '/api/v1alpha1/servers', server(), executor(), 'reboot-test')
   assert.equal(calls.filter(([, options]) => options).length, 1)
 })
 
-test('wrong confirmation sends nothing; replaced identity and maintenance cannot POST', async () => {
-  await assert.rejects(requestServerReboot(() => assert.fail('must not fetch'), '/api/v1alpha1/servers', server(), executor(), 'wrong'))
-  for (const mutate of [item => { item.metadata.uid = 'replacement' }, item => { item.status.machineRef.uid = 'replacement' }, item => { item.status.provisioning = { maintenance: true } }]) {
+test('replaced identity, active operations and maintenance cannot POST', async () => {
+  for (const mutate of [item => { item.metadata.uid = 'replacement' }, item => { item.status.machineRef.uid = 'replacement' }, item => { item.status.provisioning = { maintenance: true } }, item => { item.status.operationRef = { name: 'work', uid: 'work-uid' } }]) {
     const item = server(); mutate(item)
-    await assert.rejects(requestServerReboot(async (_, options) => { assert.equal(options, undefined); return { body: item } }, '/api/v1alpha1/servers', server(), executor(), 'node'))
+    await assert.rejects(requestServerReboot(async (_, options) => { assert.equal(options, undefined); return { body: item } }, '/api/v1alpha1/servers', server(), executor()))
   }
 })
 
@@ -62,6 +61,6 @@ test('Command creation conflicts are not automatically retried', async () => {
   await assert.rejects(requestServerReboot(async (path, options) => {
     if (!options) return { body: path.endsWith('/node') ? server() : path.includes('commands-pipelines') ? executor() : group() }
     writes++; throw new Error('Conflict')
-  }, '/api/v1alpha1/servers', server(), executor(), 'node', 'run'), /Conflict/)
+  }, '/api/v1alpha1/servers', server(), executor(), 'run'), /Conflict/)
   assert.equal(writes, 1)
 })

@@ -10,8 +10,8 @@ const partitions = () => ['efi', 'root'].map((role, index) => ({
 }))
 
 // Existing lifecycle tests use one explicit reviewed fixture layout.
-const requestServerProvision = (apiFetch, path, server, machine, disk, confirmation, name, selection) =>
-  sendProvisionRequest(apiFetch, path, server, machine, disk, confirmation, name, selection, partitions())
+const requestServerProvision = (apiFetch, path, server, machine, disk, name, selection) =>
+  sendProvisionRequest(apiFetch, path, server, machine, disk, name, selection, partitions())
 
 test('partition resolution is bound to the Server and selected disk', () => {
   const other = partitions().map(partition => ({ ...partition, spec: { ...partition.spec, serverRef: { name: 'other' } } }))
@@ -21,7 +21,7 @@ test('partition resolution is bound to the Server and selected disk', () => {
 })
 
 test('missing layout cannot save OS or create a provisioning request', async () => {
-  await assert.rejects(sendProvisionRequest(() => assert.fail('must not write'), '/api/v1alpha1/servers', server(), machine(), 'wwn:0x123', 'beelink', 'run', selection(), []), /DiskPartition/)
+  await assert.rejects(sendProvisionRequest(() => assert.fail('must not write'), '/api/v1alpha1/servers', server(), machine(), 'wwn:0x123', 'run', selection(), []), /DiskPartition/)
 })
 
 const server = () => ({ metadata: { name: 'beelink', uid: 'server-uid', generation: 1 }, spec: {
@@ -35,7 +35,7 @@ const machine = () => ({ metadata: { name: 'machine', uid: 'machine-uid' }, stat
 
 test('disk selection creates one immutable run, not a Server spec PATCH', async () => {
   const calls = []; const item = server()
-  await requestServerProvision(async (...args) => { calls.push(args) }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run-1')
+  await requestServerProvision(async (...args) => { calls.push(args) }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'run-1')
   assert.equal(calls.length, 1); assert.equal(calls[0][0], '/api/v1alpha1/provisioning-runs')
   assert.equal(calls[0][1].method, 'POST')
   const request = JSON.parse(calls[0][1].body)
@@ -43,9 +43,9 @@ test('disk selection creates one immutable run, not a Server spec PATCH', async 
   assert.deepEqual(item.spec.provisioning, { enabled: true })
 })
 
-test('unsafe selections and missing confirmation never send a request', async () => {
-  for (const [hardware, id, confirmation] of [[machine(), 'serial:usb', 'beelink'], [machine(), '/dev/sda', 'beelink'], [machine(), 'wwn:0x123', 'wrong'], [{ ...machine(), metadata: { name: 'machine', uid: 'replacement' } }, 'wwn:0x123', 'beelink']]) {
-    await assert.rejects(requestServerProvision(() => assert.fail('must not send'), '/api/v1alpha1/servers', server(), hardware, id, confirmation, 'run'))
+test('unsafe disks and replacement identities never send a request', async () => {
+  for (const [hardware, id] of [[machine(), 'serial:usb'], [machine(), '/dev/sda'], [{ ...machine(), metadata: { name: 'machine', uid: 'replacement' } }, 'wwn:0x123']]) {
+    await assert.rejects(requestServerProvision(() => assert.fail('must not send'), '/api/v1alpha1/servers', server(), hardware, id, 'run'))
   }
 })
 
@@ -84,7 +84,7 @@ test('reserved, disabled, paused and undiscovered Servers cannot request', () =>
 
 test('conflicts are surfaced without automatic retries', async () => {
   let calls = 0
-  await assert.rejects(requestServerProvision(async () => { calls++; throw new Error('Conflict') }, '/api/v1alpha1/servers', server(), machine(), 'wwn:0x123', 'beelink', 'run'), /Conflict/)
+  await assert.rejects(requestServerProvision(async () => { calls++; throw new Error('Conflict') }, '/api/v1alpha1/servers', server(), machine(), 'wwn:0x123', 'run'), /Conflict/)
   assert.equal(calls, 1)
 })
 
@@ -111,31 +111,36 @@ test('selected OS and ISO are saved with CAS; run uses returned generation', asy
       return { body: { ...item, metadata: { ...item.metadata, generation: 2, resourceVersion: '11' }, spec: { ...item.spec, operatingSystem: { ...item.spec.operatingSystem, ...patch.operatingSystem }, boot: patch.boot } } }
     }
     assert.equal(JSON.parse(options.body).spec.serverGeneration, 2)
-  }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection())
+  }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'run', selection())
   assert.deepEqual(calls.map(([path, options]) => [path, options?.method || 'GET']), [['/api/v1alpha1/servers/beelink', 'GET'], ['/api/v1alpha1/servers/beelink', 'PATCH'], ['/api/v1alpha1/provisioning-runs', 'POST']])
   assert.equal(item.spec.operatingSystem.distribution, 'arch')
 })
 
 test('unchanged selected OS/ISO does not PATCH', async () => {
   const item = server(); item.spec.operatingSystem = iso().spec; item.spec.boot.isoRef = selection().target.isoRef
-  await requestServerProvision(async (_, options) => { assert.equal(options.method, 'POST') }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection())
+  await requestServerProvision(async (_, options) => { assert.equal(options.method, 'POST') }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'run', selection())
 })
 
-test('invalid selection or confirmation cannot even save an OS', async () => {
-  for (const [choice, confirmation] of [{ ...selection(), target: { ...selection().target, version: 'bookworm' } }, selection()].map((choice, i) => [choice, i ? 'wrong' : 'beelink'])) {
-    await assert.rejects(requestServerProvision(() => assert.fail('must not write'), '/api/v1alpha1/servers', server(), machine(), 'wwn:0x123', confirmation, 'run', choice))
-  }
+test('an unsupported OS selection cannot save an OS', async () => {
+  const choice = { ...selection(), target: { ...selection().target, version: 'bookworm' } }
+  await assert.rejects(requestServerProvision(() => assert.fail('must not write'), '/api/v1alpha1/servers', server(), machine(), 'wwn:0x123', 'run', choice))
+})
+
+test('active Operation blocks provisioning before any OS save or run POST', async () => {
+  const value = server()
+  value.status.operationRef = { name: 'configure-node', uid: 'operation-uid' }
+  await assert.rejects(requestServerProvision(() => assert.fail('must not write'), '/api/v1alpha1/servers', value, machine(), 'wwn:0x123', 'run', selection()), /Operation configure-node/)
 })
 
 test('OS save conflicts never create a run or retry', async () => {
   const item = server(); item.metadata.resourceVersion = '10'; let calls = 0
-  await assert.rejects(requestServerProvision(async (_, options) => { if (!options) return { body: item }; calls++; assert.equal(options.method, 'PATCH'); throw new Error('Conflict') }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection()), /Conflict/)
+  await assert.rejects(requestServerProvision(async (_, options) => { if (!options) return { body: item }; calls++; assert.equal(options.method, 'PATCH'); throw new Error('Conflict') }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'run', selection()), /Conflict/)
   assert.equal(calls, 1)
 })
 
-test('failed run creation explains that desired OS may already be saved', async () => {
+test('failed run creation preserves the actual reason without claiming an unchanged OS was saved', async () => {
   const item = server(); item.spec.operatingSystem = iso().spec; item.spec.boot.isoRef = selection().target.isoRef
-  await assert.rejects(requestServerProvision(async () => { throw new Error('Conflict') }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection()), /selected OS may already be saved/)
+  await assert.rejects(requestServerProvision(async () => { throw new Error('Operation configure-node owns this Server') }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'run', selection()), error => /Operation configure-node/.test(error.message) && !/was saved/.test(error.message))
 })
 
 test('replaced Server after OS save never creates a run', async () => {
@@ -144,7 +149,7 @@ test('replaced Server after OS save never creates a run', async () => {
     if (!options) return { body: item }
     assert.equal(options.method, 'PATCH')
     return { body: { ...item, metadata: { ...item.metadata, uid: 'replacement' }, spec: { ...item.spec, operatingSystem: iso().spec, boot: { isoRef: selection().target.isoRef } } } }
-  }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection()), /Server changed/)
+  }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'run', selection()), /Server changed/)
 })
 
 test('fresh-read desired-generation changes cannot save OS or create a run', async () => {
@@ -152,5 +157,5 @@ test('fresh-read desired-generation changes cannot save OS or create a run', asy
   await assert.rejects(requestServerProvision(async (_, options) => {
     assert.equal(options, undefined)
     return { body: { ...item, metadata: { ...item.metadata, generation: 2 } } }
-  }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'beelink', 'run', selection()), /desired configuration or binding changed/)
+  }, '/api/v1alpha1/servers', item, machine(), 'wwn:0x123', 'run', selection()), /desired configuration or binding changed/)
 })

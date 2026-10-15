@@ -26,10 +26,13 @@
   in `serverProvisioningProgress.js`; do not invent persisted event history or
   completed/skipped stages. Keep run identities separate and reject stale or
   replaced-UID poll responses. Polling must never write.
-- Show discovered disks and OS/ISO, require exact-name confirmation, and send
+- Show discovered disks and OS/ISO, keep an explicit warning/action dialog, and send
   the reviewed Server generation plus Server/Machine UIDs. Never retry conflicts
   or queue duplicate pending/active requests. A Provision click authorizes disk
   replacement; do not trigger a real node when testing UI code.
+- No typed-name confirmation for provisioning/reboot. Observe generic Operations
+  through target.status.operationRef and UID-checked reads. Busy ownership is not
+  a desired-spec conflict; show its actual reason/link, never clear it from the UI.
 - Provision OS/version/ISO choices come from current Ready ISO resources, filtered
   to installer-supported targets. Confirmation conditionally saves Server OS/boot
   spec before run creation; failures can leave desired spec saved without a run.

@@ -26,7 +26,7 @@ export function resourceReferences(item) {
         for (const reference of child) {
           if (reference?.kind && reference?.name && reference?.uid) references.push({ ...reference, field: location })
         }
-      } else if (field.endsWith('Ref') && child?.kind && child?.name) {
+      } else if ((field.endsWith('Ref') || field === 'requestedBy') && child?.kind && child?.name) {
         references.push({ ...child, field: location })
       } else walk(child, location)
     }
@@ -79,7 +79,7 @@ export function trustHealth(item) {
 
 export function statusDetails(item) {
   const status = item.status || {}
-  const fields = ['currentStage', 'reason', 'message', 'startedAt', 'completedAt', 'sourceBootID', 'liveBootID', 'backendRunID', 'lastVerifiedAt', 'inputRevision', 'playbookRevision']
+  const fields = ['currentStage', 'currentStep', 'reason', 'message', 'startedAt', 'updatedAt', 'completedAt', 'sourceBootID', 'liveBootID', 'backendRunID', 'lastVerifiedAt', 'inputRevision', 'playbookRevision']
   const details = fields.filter(field => status[field]).map(field => ({ label: humanize(field), value: String(status[field]) }))
   if (status.hostSSH?.message) details.push({ label: 'Host SSH', value: status.hostSSH.message })
   return details

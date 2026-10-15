@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Box, Button, Code, Group, Modal, Select, Stack, Text, TextInput, Tooltip } from '@mantine/core'
+import { Alert, Box, Button, Code, Group, Modal, Select, Stack, Text, Tooltip } from '@mantine/core'
 import { RotateCw } from 'lucide-react'
 import { executorContainsServer, rebootBlockReason, requestServerReboot } from './serverOperations.js'
 
 export default function ServerRebootButton({ item, resourcePath, apiFetch, onRequested, compact = false }) {
   const [opened, setOpened] = useState(false)
-  const [confirmation, setConfirmation] = useState('')
   const [executors, setExecutors] = useState([])
   const [executorUID, setExecutorUID] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -37,7 +36,7 @@ export default function ServerRebootButton({ item, resourcePath, apiFetch, onReq
   const close = () => { if (!inFlight.current) { loadID.current++; setOpened(false) } }
   const open = async () => {
     const attempt = ++loadID.current
-    setOpened(true); setConfirmation(''); setError(''); setExecutors([]); setExecutorUID(null); setNeedsReview(false); setLoading(true)
+    setOpened(true); setError(''); setExecutors([]); setExecutorUID(null); setNeedsReview(false); setLoading(true)
     try {
       const [pipelines, groups] = await Promise.all([apiFetch(`${base}/commands-pipelines`), apiFetch(`${base}/inventory-capture-groups`)])
       if (attempt !== loadID.current) return
@@ -51,7 +50,7 @@ export default function ServerRebootButton({ item, resourcePath, apiFetch, onReq
     if (inFlight.current) return
     inFlight.current = true; setSaving(true); setError('')
     try {
-      const result = await requestServerReboot(apiFetch, resourcePath, item, executors.find(executor => executor.metadata.uid === executorUID), confirmation)
+      const result = await requestServerReboot(apiFetch, resourcePath, item, executors.find(executor => executor.metadata.uid === executorUID))
       setCommand(result.body); setOpened(false); onRequested?.(result)
     } catch (caught) { setError(`${caught.message} No automatic retry: refresh and inspect Commands before trying again.`); setNeedsReview(true) }
     finally { inFlight.current = false; setSaving(false) }
@@ -68,8 +67,7 @@ export default function ServerRebootButton({ item, resourcePath, apiFetch, onReq
         <Text size="sm">Creates an ordinary single-Server Command. Ansible verifies a changed boot ID and fresh strict SSH; the homelabd badge separately shows reporting freshness.</Text>
         <Code>{item.metadata.uid}</Code>
         {error && <Alert color="red">{error}</Alert>}
-        <TextInput label={`Type ${item.metadata.name} to confirm`} value={confirmation} onChange={event => setConfirmation(event.currentTarget.value)} disabled={saving} autoComplete="off" />
-        <Group justify="flex-end"><Button variant="default" onClick={close} disabled={saving}>Cancel</Button><Button onClick={request} loading={saving} disabled={Boolean(blocked) || !executorUID || confirmation !== item.metadata.name || loading || needsReview}>Reboot Server</Button></Group>
+        <Group justify="flex-end"><Button variant="default" onClick={close} disabled={saving}>Cancel</Button><Button onClick={request} loading={saving} disabled={Boolean(blocked) || !executorUID || loading || needsReview}>Reboot Server</Button></Group>
       </Stack>
     </Modal>
   </Box>

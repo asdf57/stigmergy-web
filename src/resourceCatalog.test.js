@@ -10,7 +10,7 @@ function apiFixture(kinds) {
       get: {},
       post: { requestBody: { content: { 'application/json': { schema: { $ref: `#/components/schemas/${kind}Create` } } } } },
     }
-    spec.paths[`${path}/{name}`] = { get: {}, delete: {}, ...(kind === 'ProvisioningRun' || kind === 'Command' ? {} : { put: {} }) }
+    spec.paths[`${path}/{name}`] = { get: {}, delete: {}, ...(['ProvisioningRun', 'Command', 'Operation'].includes(kind) ? {} : { put: {} }) }
     spec.components.schemas[`${kind}Create`] = { properties: {
       kind: { const: kind }, apiVersion: { const: 'homelab.io/v1alpha1' },
       spec: { $ref: `#/components/schemas/${kind}Spec` },
@@ -25,7 +25,7 @@ test('every current API resource appears in navigation exactly once', () => {
     'InventoryCaptureGroup', 'InventoryPublication', 'ISO', 'Machine', 'MachineReport',
     'Pipeline', 'PipelineProvider', 'ProvisioningRun', 'Router', 'Secret', 'SecretStore',
     'Server', 'SSHCertificateAuthority', 'SSHCertificate', 'SSHKeyPair',
-    'UsernamePasswordCredential', 'KubeCluster', 'Configuration', 'FutureResource',
+    'UsernamePasswordCredential', 'KubeCluster', 'Configuration', 'Operation', 'FutureResource',
   ]
   const resources = discoverResources(apiFixture(kinds))
   const groups = groupResources(resources)
@@ -36,7 +36,7 @@ test('every current API resource appears in navigation exactly once', () => {
 })
 
 test('immutable requests are viewable and deletable, but not editable', () => {
-  const fixture = apiFixture(['ProvisioningRun', 'Command', 'DiskPartition'])
+  const fixture = apiFixture(['ProvisioningRun', 'Command', 'Operation', 'DiskPartition'])
   // Command exposes PUT for idempotent replacement, but its spec is immutable.
   fixture.paths['/api/v1alpha1/commands/{name}'].put = { description: "This resource's spec is immutable after creation." }
   const resources = discoverResources(fixture)
@@ -54,6 +54,7 @@ test('new resource references resolve to the correct catalog', () => {
   assert.equal(referenceKinds.authorityRef, 'SSHCertificateAuthority')
   assert.equal(referenceKinds.keyPairRef, 'SSHKeyPair')
   assert.equal(referenceKinds.commandsPipelineRef, 'CommandsPipeline')
+  assert.equal(referenceKinds.operationRef, 'Operation')
 })
 
 test('status and parameterized paths do not become resource collections', () => {

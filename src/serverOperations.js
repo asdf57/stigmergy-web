@@ -2,6 +2,7 @@ export function rebootBlockReason(server) {
   if (server.metadata?.deletionTimestamp) return 'Server is being deleted.'
   if (!server.metadata?.uid || !server.status?.machineRef?.uid) return 'Waiting for a bound Machine.'
   if (server.status?.provisioning?.maintenance || server.status?.provisioning?.activeRunRef) return 'Provisioning owns this Server.'
+  if (server.status?.operationRef) return `Operation ${server.status.operationRef.name} owns this Server.`
   if (server.spec?.reconciliation?.paused) return 'Server reconciliation is paused.'
   if (server.status?.hostSSH?.phase !== 'Ready' || !server.status?.networking?.management?.address?.address) return 'Waiting for verified management SSH.'
   return ''
@@ -28,8 +29,7 @@ export function executorContainsServer(executor, group, server) {
 
 function shellQuote(value) { return `'${String(value).replaceAll("'", "'\\''")}'` }
 
-export async function requestServerReboot(apiFetch, resourcePath, server, executor, confirmation, commandName) {
-  if (confirmation !== server.metadata.name) throw new Error('Type the exact Server name to confirm reboot.')
+export async function requestServerReboot(apiFetch, resourcePath, server, executor, commandName) {
   const { body: latest } = await apiFetch(`${resourcePath}/${encodeURIComponent(server.metadata.name)}`)
   if (latest.metadata.uid !== server.metadata.uid || latest.status?.machineRef?.uid !== server.status?.machineRef?.uid) throw new Error('Server or Machine identity changed. Refresh and review.')
   const blocked = rebootBlockReason(latest)
