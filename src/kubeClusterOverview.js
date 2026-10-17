@@ -17,7 +17,7 @@ function membershipObservation(cluster, configurations, now) {
     && observation.observedGeneration === cluster.metadata.generation
     && configuration?.metadata.generation === observation.configurationGeneration
     && configuration?.status?.inputRevision === observation.inputRevision
-    && configuration?.status?.playbookRevision === observation.playbookRevision
+    && configuration?.status?.sourceRevision === observation.playbookRevision
   return { ...observation, timestamp, fresh, configuration }
 }
 
@@ -101,7 +101,7 @@ export function clusterOverview(cluster, servers, configurations, now = Date.now
     && (!observation || (observation.fresh && observation.membership.ready))
     && observed.configurationGeneration === configuration.metadata.generation
     && observed.inputRevision === configuration.status?.inputRevision
-    && observed.playbookRevision === configuration.status?.playbookRevision
+    && observed.playbookRevision === configuration.status?.sourceRevision
     && members.every(member => configuration.status?.resolvedReferences?.some(reference =>
       reference.kind === 'Server' && reference.uid === member.server.metadata.uid
       && reference.name === member.server.metadata.name && reference.generation === member.server.metadata.generation)))

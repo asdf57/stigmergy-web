@@ -10,7 +10,7 @@ function fixtures() {
     labels: { 'homelab.io/kube-cluster': 'lab', 'homelab.io/kube-role': 'control-plane' } } }]
   const configurations = [{ kind: 'Configuration', metadata: { name: 'setup', uid: 'setup-uid', generation: 1 },
     spec: { targetRef: { kind: 'KubeCluster', name: 'lab' } }, status: { phase: 'Reconciling',
-      inputRevision: 'revision', playbookRevision: 'commit', resolvedReferences: [
+      inputRevision: 'revision', sourceRevision: 'commit', resolvedReferences: [
         { kind: 'Server', name: 'zima', uid: 'server-uid', generation: 1 }] } }]
   const cluster = { kind: 'KubeCluster', metadata: { name: 'lab', uid: 'cluster-uid', generation: 1 }, spec,
     status: { ...structuredClone(spec), observedGeneration: 1,

@@ -79,7 +79,7 @@ export function trustHealth(item) {
 
 export function statusDetails(item) {
   const status = item.status || {}
-  const fields = ['currentStage', 'currentStep', 'reason', 'message', 'startedAt', 'updatedAt', 'completedAt', 'sourceBootID', 'liveBootID', 'backendRunID', 'lastVerifiedAt', 'inputRevision', 'playbookRevision']
+  const fields = ['currentStage', 'currentStep', 'reason', 'message', 'startedAt', 'updatedAt', 'completedAt', 'sourceBootID', 'liveBootID', 'backendRunID', 'lastVerifiedAt', 'inputRevision', 'sourceRevision', 'playbookRevision']
   const details = fields.filter(field => status[field]).map(field => ({ label: humanize(field), value: String(status[field]) }))
   if (status.hostSSH?.message) details.push({ label: 'Host SSH', value: status.hostSSH.message })
   return details

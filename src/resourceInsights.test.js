@@ -16,14 +16,14 @@ const partition = (name, serverName = 'zima', uid = 'server-uid') => ({
   spec: { serverRef: { name: serverName, uid }, number: 3 },
 })
 
-test('Configuration exposes resolved status identities and actual playbook commit', () => {
+test('Configuration exposes resolved status identities and actual source commit', () => {
   const commit = 'a'.repeat(40)
   const item = { kind: 'Configuration', spec: { targetRef: { kind: 'KubeCluster', name: 'lab' } },
-    status: { playbookRevision: commit, resolvedReferences: [
+    status: { sourceRevision: commit, resolvedReferences: [
       { kind: 'KubeCluster', name: 'lab', uid: 'cluster-uid', generation: 1 },
     ] } }
   assert.deepEqual(resourceReferences(item).map(ref => ref.uid), [undefined, 'cluster-uid'])
-  assert.equal(statusDetails(item).find(detail => detail.label === 'Playbook Revision').value, commit)
+  assert.equal(statusDetails(item).find(detail => detail.label === 'Source Revision').value, commit)
 })
 
 test('references include pinned relationships but never arbitrary secret data or snapshot inputs', () => {

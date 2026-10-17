@@ -7,6 +7,7 @@ export const resourceGroups = [
 ]
 
 export const referenceKinds = {
+  kubeClusterRef: 'KubeCluster',
   operationRef: 'Operation',
   dependsOn: 'Configuration',
   authorizedKeyRefs: 'SSHKeyPair',
