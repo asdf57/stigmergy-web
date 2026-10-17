@@ -6,6 +6,8 @@ import {
 import { ResourceLink } from './ResourceInsights.jsx'
 import { agentPulse } from './serverOperations.js'
 import { clusterOverview, loadClusterOverview } from './kubeClusterOverview.js'
+import ClusterComponents from './ClusterComponents.jsx'
+import { clusterComponents } from './clusterComponents.js'
 
 const roleName = role => ({ 'control-plane': 'Control plane', worker: 'Worker' })[role] || 'Unknown role'
 const time = value => Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString() : 'Not reported'
@@ -102,6 +104,8 @@ export default function KubeClusterOverview({ item, resources, apiFetch }) {
   const cluster = sameLifetime ? snapshot.cluster : item
   const overview = sameLifetime ? clusterOverview(cluster, snapshot.servers, snapshot.configurations, now) : null
   const verification = overview?.verification
+  const componentUIDs = new Set(sameLifetime ? clusterComponents(cluster, snapshot.configurations).map(configuration => configuration.metadata.uid) : [])
+  const setupConfigurations = overview?.setups.filter(configuration => !componentUIDs.has(configuration.metadata.uid)) || []
   const settings = cluster.spec || {}
   const controlPlane = overview?.controlPlanes.length === 1 && !overview.controlPlanes[0].bindingConflict
     && !overview.controlPlanes[0].server.metadata.deletionTimestamp
@@ -174,9 +178,9 @@ export default function KubeClusterOverview({ item, resources, apiFetch }) {
         </Alert>}
       </div>
       <div>
-        <Title order={3} size="h5" mb="xs">Configuration resources</Title>
-        {!overview.setups.length ? <Text size="sm" c="dimmed">No Configuration targets this cluster.</Text> : <Stack gap="xs">
-          {overview.setups.map(configuration => <Group key={configuration.metadata.uid} justify="space-between">
+        <Title order={3} size="h5" mb="xs">Cluster setup</Title>
+        {!setupConfigurations.length ? <Text size="sm" c="dimmed">No setup Configuration targets this cluster.</Text> : <Stack gap="xs">
+          {setupConfigurations.map(configuration => <Group key={configuration.metadata.uid} justify="space-between">
             <ResourceLink reference={{ kind: 'Configuration', ...configuration.metadata }} resources={resources} />
             <Group gap="xs"><Badge variant="light" color={configuration.status?.phase === 'Failed' ? 'red' : 'blue'}>{configuration.status?.phase || 'Not reported'}</Badge>
               <Text size="xs" c="dimmed">{configuration.status?.reason || ''}</Text>
@@ -189,6 +193,7 @@ export default function KubeClusterOverview({ item, resources, apiFetch }) {
           <Text size="xs" c="dimmed">Node readiness is a timestamped observation, not a live browser connection to Kubernetes.</Text>
         </>}
       </div>
+      <ClusterComponents cluster={cluster} configurations={snapshot.configurations} resources={resources} now={now} refreshUnavailable={Boolean(error)} />
       {accessCommand && <div>
         <Group justify="space-between" mb="xs"><Title order={3} size="h5">Inspect from homelabc</Title>
           <CopyButton value={accessCommand}>{({ copied, copy }) => <Button size="compact-sm" variant="default" onClick={copy}>{copied ? 'Copied' : 'Copy command'}</Button>}</CopyButton>

@@ -75,6 +75,13 @@ the UID-bound Machine and this Server's DiskPartitions, displaying desired layou
 separately from discovered disks/filesystems. Refresh storage to read newer reports.
 These panels only read resources; they never reconcile storage or create requests.
 
+KubeCluster details separate cluster setup from component Configurations. Components
+are associated through an explicit Kubernetes context reference, or a cluster target
+and dependency chain leading to cluster setup. The panel links each Configuration
+and its dependencies, showing reported reconciliation and last verification time.
+Changed generations, replaced references and stale observations are not shown as
+currently verified. This is not a live Kubernetes workload inventory.
+
 SSHCertificate details show validity/expiry/renewal dates. Server and ISO details
 compare desired trust digests with reported installed or completed-image digests.
 Matching digests and valid dates alone are not proof of live health/readiness.
